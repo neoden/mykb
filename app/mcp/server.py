@@ -30,6 +30,8 @@ async def store_chunk(content: str, metadata: dict | None = None) -> dict:
 async def search_chunks(query: str, limit: int = 20) -> list[dict]:
     """Full-text search across all stored chunks.
 
+    Searches both content and metadata fields.
+
     Args:
         query: Search query (supports FTS5 syntax)
         limit: Maximum results to return (default 20)

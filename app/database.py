@@ -13,26 +13,27 @@ CREATE TABLE IF NOT EXISTS chunks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- FTS5 virtual table for search
+-- FTS5 virtual table for search (includes metadata)
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     id,
     content,
+    metadata,
     content='chunks',
     content_rowid='rowid'
 );
 
 -- Triggers to keep FTS in sync
 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-    INSERT INTO chunks_fts(rowid, id, content) VALUES (NEW.rowid, NEW.id, NEW.content);
+    INSERT INTO chunks_fts(rowid, id, content, metadata) VALUES (NEW.rowid, NEW.id, NEW.content, NEW.metadata);
 END;
 
 CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-    INSERT INTO chunks_fts(chunks_fts, rowid, id, content) VALUES('delete', OLD.rowid, OLD.id, OLD.content);
+    INSERT INTO chunks_fts(chunks_fts, rowid, id, content, metadata) VALUES('delete', OLD.rowid, OLD.id, OLD.content, OLD.metadata);
 END;
 
 CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
-    INSERT INTO chunks_fts(chunks_fts, rowid, id, content) VALUES('delete', OLD.rowid, OLD.id, OLD.content);
-    INSERT INTO chunks_fts(rowid, id, content) VALUES (NEW.rowid, NEW.id, NEW.content);
+    INSERT INTO chunks_fts(chunks_fts, rowid, id, content, metadata) VALUES('delete', OLD.rowid, OLD.id, OLD.content, OLD.metadata);
+    INSERT INTO chunks_fts(rowid, id, content, metadata) VALUES (NEW.rowid, NEW.id, NEW.content, NEW.metadata);
 END;
 
 -- OAuth clients table

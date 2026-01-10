@@ -13,6 +13,9 @@ echo "Syncing files..."
 rsync -av --exclude='.venv' --exclude='__pycache__' --exclude='*.db' --exclude='.git' --exclude='.env' \
     ./ ${HOST}:${REMOTE_DIR}/
 
+echo "Ensuring data directory exists..."
+ssh ${HOST} "mkdir -p ${REMOTE_DIR}/data"
+
 echo "Rebuilding and restarting app..."
 ssh ${HOST} "cd ${REMOTE_DIR} && docker compose up -d --build app"
 
