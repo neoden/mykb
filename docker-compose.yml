@@ -1,0 +1,47 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - BASE_URL=${BASE_URL}
+      - DATABASE_PATH=/data/mykb.db
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - mykb-data:/data
+    depends_on:
+      - redis
+    networks:
+      - mykb
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - mykb
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    networks:
+      - mykb
+
+volumes:
+  mykb-data:
+  redis-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  mykb:
