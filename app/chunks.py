@@ -138,6 +138,10 @@ async def list_chunks(offset: int = 0, limit: int = 50) -> tuple[list[Chunk], in
 
 async def search_chunks(query: str, limit: int = 20) -> list[SearchResult]:
     """Full-text search across chunks."""
+    # Escape each token for FTS5: wrap individual words in quotes
+    tokens = query.split()
+    escaped_tokens = ['"' + t.replace('"', '""') + '"' for t in tokens]
+    escaped_query = ' '.join(escaped_tokens)
     db = await get_db()
     try:
         cursor = await db.execute(
@@ -149,7 +153,7 @@ async def search_chunks(query: str, limit: int = 20) -> list[SearchResult]:
             ORDER BY rank
             LIMIT ?
             """,
-            (query, limit),
+            (escaped_query, limit),
         )
         rows = await cursor.fetchall()
 
