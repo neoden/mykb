@@ -1,3 +1,4 @@
+import hmac
 import html
 import json
 import uuid
@@ -151,7 +152,7 @@ async def authorize_post(
 ):
     """Handle authorization form submission."""
     # Verify password
-    if password != settings.auth_password:
+    if not hmac.compare_digest(password, settings.auth_password):
         raise HTTPException(status_code=401, detail="Invalid password")
 
     # Generate authorization code
