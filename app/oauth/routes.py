@@ -58,14 +58,11 @@ async def register_client(request: Request, data: ClientRegistration):
     client_id = str(uuid.uuid4())
 
     db = await get_db()
-    try:
-        await db.execute(
-            "INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES (?, ?, ?)",
-            (client_id, data.client_name, json.dumps(data.redirect_uris)),
-        )
-        await db.commit()
-    finally:
-        await db.close()
+    await db.execute(
+        "INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES (?, ?, ?)",
+        (client_id, data.client_name, json.dumps(data.redirect_uris)),
+    )
+    await db.commit()
 
     return ClientRegistrationResponse(
         client_id=client_id,
@@ -88,14 +85,11 @@ async def authorize_get(
     """Authorization endpoint - show login form."""
     # Validate client
     db = await get_db()
-    try:
-        cursor = await db.execute(
-            "SELECT redirect_uris FROM oauth_clients WHERE client_id = ?",
-            (client_id,),
-        )
-        row = await cursor.fetchone()
-    finally:
-        await db.close()
+    cursor = await db.execute(
+        "SELECT redirect_uris FROM oauth_clients WHERE client_id = ?",
+        (client_id,),
+    )
+    row = await cursor.fetchone()
 
     if not row:
         raise HTTPException(status_code=400, detail="Invalid client_id")

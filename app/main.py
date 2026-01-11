@@ -5,7 +5,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.routes import router as api_router
-from app.database import init_db
+from app.database import get_db, init_db
 from app.mcp.server import mcp
 from app.oauth.middleware import require_auth
 from app.oauth.routes import limiter, router as oauth_router
@@ -17,7 +17,8 @@ mcp_app = mcp.http_app()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database and MCP on startup."""
-    await init_db()
+    db = await get_db()
+    await init_db(db)
     # Run MCP's lifespan
     async with mcp_app.lifespan(mcp_app):
         yield
