@@ -1,12 +1,14 @@
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.api.routes import router as api_router
 from app.database import init_db
 from app.mcp.server import mcp
 from app.oauth.middleware import require_auth
-from app.oauth.routes import router as oauth_router
+from app.oauth.routes import limiter, router as oauth_router
 
 # Get MCP http app with its lifespan
 mcp_app = mcp.http_app()
@@ -27,6 +29,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # OAuth endpoints (public)
 app.include_router(oauth_router)

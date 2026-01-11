@@ -4,6 +4,8 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.config import settings
 from app.database import get_db
@@ -24,6 +26,7 @@ from app.oauth.tokens import (
     validate_refresh_token,
 )
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(tags=["oauth"])
 
 
@@ -42,7 +45,8 @@ async def oauth_metadata():
 
 
 @router.post("/register", response_model=ClientRegistrationResponse)
-async def register_client(data: ClientRegistration):
+@limiter.limit("10/hour")
+async def register_client(request: Request, data: ClientRegistration):
     """Dynamic Client Registration (RFC 7591)."""
     client_id = str(uuid.uuid4())
 
@@ -134,7 +138,9 @@ async def authorize_get(
 
 
 @router.post("/authorize")
+@limiter.limit("5/minute")
 async def authorize_post(
+    request: Request,
     client_id: str = Form(...),
     redirect_uri: str = Form(...),
     code_challenge: str = Form(...),
@@ -161,7 +167,9 @@ async def authorize_post(
 
 
 @router.post("/token", response_model=TokenResponse)
+@limiter.limit("30/minute")
 async def token(
+    request: Request,
     grant_type: str = Form(...),
     code: str = Form(None),
     redirect_uri: str = Form(None),
