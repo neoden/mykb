@@ -1,3 +1,4 @@
+import html
 import json
 import uuid
 from urllib.parse import urlencode
@@ -102,8 +103,8 @@ async def authorize_get(
     if code_challenge_method != "S256":
         raise HTTPException(status_code=400, detail="Unsupported code_challenge_method")
 
-    # Render login form
-    html = f"""
+    # Render login form - escape all user-controlled values to prevent XSS
+    page = f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -123,18 +124,18 @@ async def authorize_get(
         <h1>Authorize Access</h1>
         <p class="info">An application is requesting access to your MyKB data.</p>
         <form method="POST" action="/authorize">
-            <input type="hidden" name="client_id" value="{client_id}">
-            <input type="hidden" name="redirect_uri" value="{redirect_uri}">
-            <input type="hidden" name="code_challenge" value="{code_challenge}">
-            <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
-            <input type="hidden" name="state" value="{state or ''}">
+            <input type="hidden" name="client_id" value="{html.escape(client_id)}">
+            <input type="hidden" name="redirect_uri" value="{html.escape(redirect_uri)}">
+            <input type="hidden" name="code_challenge" value="{html.escape(code_challenge)}">
+            <input type="hidden" name="code_challenge_method" value="{html.escape(code_challenge_method)}">
+            <input type="hidden" name="state" value="{html.escape(state or '')}">
             <input type="password" name="password" placeholder="Enter password" required autofocus>
             <button type="submit">Authorize</button>
         </form>
     </body>
     </html>
     """
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=page)
 
 
 @router.post("/authorize")
