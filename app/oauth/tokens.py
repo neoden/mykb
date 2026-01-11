@@ -113,6 +113,25 @@ async def revoke_refresh_token(token: str) -> None:
     await redis.delete(f"refresh_token:{token_hash}")
 
 
+async def store_csrf_token(token: str) -> None:
+    """Store CSRF token in Redis with short TTL (5 minutes)."""
+    redis = await get_redis()
+    token_hash = hash_token(token)
+    await redis.setex(f"csrf:{token_hash}", 300, "1")
+
+
+async def validate_csrf_token(token: str) -> bool:
+    """Validate and consume CSRF token (single-use)."""
+    redis = await get_redis()
+    token_hash = hash_token(token)
+    key = f"csrf:{token_hash}"
+    exists = await redis.get(key)
+    if exists:
+        await redis.delete(key)
+        return True
+    return False
+
+
 class RedisTokenVerifier(TokenVerifier):
     """Custom token verifier that validates tokens against Redis."""
 

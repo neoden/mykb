@@ -24,7 +24,9 @@ from app.oauth.tokens import (
     revoke_refresh_token,
     store_access_token,
     store_auth_code,
+    store_csrf_token,
     store_refresh_token,
+    validate_csrf_token,
     validate_refresh_token,
 )
 
@@ -104,6 +106,10 @@ async def authorize_get(
     if code_challenge_method != "S256":
         raise HTTPException(status_code=400, detail="Unsupported code_challenge_method")
 
+    # Generate CSRF token
+    csrf_token = generate_token()
+    await store_csrf_token(csrf_token)
+
     # Render login form - escape all user-controlled values to prevent XSS
     page = f"""
     <!DOCTYPE html>
@@ -130,6 +136,7 @@ async def authorize_get(
             <input type="hidden" name="code_challenge" value="{html.escape(code_challenge)}">
             <input type="hidden" name="code_challenge_method" value="{html.escape(code_challenge_method)}">
             <input type="hidden" name="state" value="{html.escape(state or '')}">
+            <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
             <input type="password" name="password" placeholder="Enter password" required autofocus>
             <button type="submit">Authorize</button>
         </form>
@@ -148,9 +155,14 @@ async def authorize_post(
     code_challenge: str = Form(...),
     code_challenge_method: str = Form("S256"),
     state: str = Form(None),
+    csrf_token: str = Form(...),
     password: str = Form(...),
 ):
     """Handle authorization form submission."""
+    # Verify CSRF token
+    if not await validate_csrf_token(csrf_token):
+        raise HTTPException(status_code=400, detail="Invalid or expired CSRF token")
+
     # Verify password
     if not hmac.compare_digest(password, settings.auth_password):
         raise HTTPException(status_code=401, detail="Invalid password")
