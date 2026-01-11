@@ -93,3 +93,17 @@ Protected by Bearer token (same as MCP):
 - `PUT /api/chunks/{id}` - Update
 - `DELETE /api/chunks/{id}` - Delete
 - `GET /api/search?q=...` - Search
+
+## Testing
+
+```bash
+uv run pytest
+```
+
+Tests use in-memory SQLite and fakeredis. Fixtures in `tests/conftest.py` patch `get_db()` and `get_redis()`.
+
+| File | Coverage |
+|------|----------|
+| `tests/test_api.py` | REST API endpoints |
+| `tests/test_mcp.py` | MCP tools via FastMCP Client |
+| `tests/test_oauth.py` | OAuth flow + token utilities |
