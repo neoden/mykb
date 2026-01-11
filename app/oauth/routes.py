@@ -72,6 +72,7 @@ async def register_client(request: Request, data: ClientRegistration):
 
 
 @router.get("/authorize", response_class=HTMLResponse)
+@limiter.limit("20/minute")
 async def authorize_get(
     request: Request,
     client_id: str = Query(...),
