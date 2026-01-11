@@ -12,8 +12,12 @@ COPY app ./app
 # Install dependencies
 RUN uv sync --frozen --no-dev
 
-# Create data directory
-RUN mkdir -p /data
+# Create non-root user (high UID to avoid conflicts) and data directory
+RUN useradd --create-home --shell /bin/bash --uid 10000 appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data
+
+USER appuser
 
 EXPOSE 8000
 
