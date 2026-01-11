@@ -6,7 +6,7 @@ services:
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - BASE_URL=${BASE_URL}
       - DATABASE_PATH=/data/mykb.db
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
     volumes:
       - /opt/mykb/data:/data
     depends_on:
@@ -17,6 +17,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     networks:
