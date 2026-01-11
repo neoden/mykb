@@ -10,7 +10,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.config import settings
-from app.database import get_db
+from app.database import delete_stale_clients, get_db, touch_client
 from app.models import (
     ClientRegistration,
     ClientRegistrationResponse,
@@ -52,6 +52,9 @@ async def oauth_metadata():
 @limiter.limit("10/hour")
 async def register_client(request: Request, data: ClientRegistration):
     """Dynamic Client Registration (RFC 7591)."""
+    # Clean up stale clients (unused for 90+ days)
+    await delete_stale_clients()
+
     client_id = str(uuid.uuid4())
 
     db = await get_db()
@@ -219,6 +222,9 @@ async def token(
         await store_access_token(access_token, client_id)
         await store_refresh_token(new_refresh_token, client_id)
 
+        # Track client usage for auto-expiry
+        await touch_client(client_id)
+
         return TokenResponse(
             access_token=access_token,
             token_type="Bearer",
@@ -245,6 +251,9 @@ async def token(
         new_refresh_token = generate_token()
         await store_access_token(access_token, token_client_id)
         await store_refresh_token(new_refresh_token, token_client_id)
+
+        # Track client usage for auto-expiry
+        await touch_client(token_client_id)
 
         return TokenResponse(
             access_token=access_token,

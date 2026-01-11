@@ -13,9 +13,9 @@ COPY app ./app
 RUN uv sync --frozen --no-dev
 
 # Create non-root user (high UID to avoid conflicts) and data directory
-RUN useradd --create-home --shell /bin/bash --uid 10000 appuser \
+RUN useradd --no-log-init --create-home --uid 10000 appuser \
     && mkdir -p /data \
-    && chown -R appuser:appuser /app /data
+    && chown appuser:appuser /data
 
 USER appuser
 
