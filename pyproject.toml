@@ -30,3 +30,6 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning:aiosqlite",
+]

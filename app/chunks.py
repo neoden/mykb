@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiosqlite
 
@@ -11,7 +11,7 @@ from app.models import Chunk, ChunkCreate, ChunkUpdate, SearchResult
 async def create_chunk(data: ChunkCreate) -> Chunk:
     """Create a new chunk."""
     chunk_id = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     metadata_json = json.dumps(data.metadata) if data.metadata else None
 
     db = await get_db()
@@ -58,7 +58,7 @@ async def update_chunk(chunk_id: str, data: ChunkUpdate) -> Chunk | None:
     if not existing:
         return None
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     content = data.content if data.content is not None else existing.content
     metadata = data.metadata if data.metadata is not None else existing.metadata
     metadata_json = json.dumps(metadata) if metadata else None
