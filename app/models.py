@@ -76,3 +76,9 @@ class OAuthMetadata(BaseModel):
     response_types_supported: list[str] = ["code"]
     grant_types_supported: list[str] = ["authorization_code"]
     code_challenge_methods_supported: list[str] = ["S256"]
+
+
+class ProtectedResourceMetadata(BaseModel):
+    """OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
+    resource: str
+    authorization_servers: list[str]

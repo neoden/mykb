@@ -110,3 +110,20 @@ async def delete_chunk(chunk_id: str) -> bool:
         True if deleted, False if not found
     """
     return await chunks.delete_chunk(chunk_id)
+
+
+@mcp.tool()
+async def get_metadata_index(top_n: int = 20) -> dict:
+    """Get an overview of all metadata in the knowledge base.
+
+    Returns aggregated metadata keys with their most common values and counts.
+    Useful for understanding what's stored and maintaining consistent metadata
+    structure when adding new chunks.
+
+    Args:
+        top_n: Maximum number of values to return per key (default 20)
+
+    Returns:
+        Dict with total_chunks count and keys mapping to their top values
+    """
+    return await chunks.get_metadata_index(top_n)

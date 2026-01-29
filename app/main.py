@@ -1,6 +1,9 @@
+import logging
+import sys
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -10,8 +13,16 @@ from app.mcp.server import mcp
 from app.oauth.middleware import require_auth
 from app.oauth.routes import limiter, router as oauth_router
 
-# Get MCP http app with its lifespan
-mcp_app = mcp.http_app()
+# Configure logging to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
+# Get MCP http app (stateless to handle session-id issues with proxies)
+mcp_app = mcp.http_app(stateless_http=True)
 
 
 @asynccontextmanager
@@ -34,6 +45,14 @@ app = FastAPI(
 # Rate limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Log unhandled exceptions with traceback."""
+    logger.exception(f"Unhandled exception on {request.method} {request.url.path}")
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # OAuth endpoints (public)
 app.include_router(oauth_router)

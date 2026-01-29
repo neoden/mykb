@@ -15,6 +15,7 @@ from app.models import (
     ClientRegistration,
     ClientRegistrationResponse,
     OAuthMetadata,
+    ProtectedResourceMetadata,
     TokenResponse,
 )
 from app.oauth.tokens import (
@@ -34,9 +35,8 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(tags=["oauth"])
 
 
-@router.get("/.well-known/oauth-authorization-server", response_model=OAuthMetadata)
-async def oauth_metadata():
-    """OAuth 2.0 Authorization Server Metadata (RFC 8414)."""
+def _oauth_metadata() -> OAuthMetadata:
+    """Build OAuth metadata response."""
     return OAuthMetadata(
         issuer=settings.base_url,
         authorization_endpoint=f"{settings.base_url}/authorize",
@@ -46,6 +46,38 @@ async def oauth_metadata():
         grant_types_supported=["authorization_code", "refresh_token"],
         code_challenge_methods_supported=["S256"],
     )
+
+
+@router.get("/.well-known/oauth-authorization-server", response_model=OAuthMetadata)
+async def oauth_metadata():
+    """OAuth 2.0 Authorization Server Metadata (RFC 8414)."""
+    return _oauth_metadata()
+
+
+@router.get("/.well-known/oauth-authorization-server/mcp", response_model=OAuthMetadata)
+async def oauth_metadata_mcp():
+    """OAuth 2.0 Authorization Server Metadata for /mcp path (RFC 8414)."""
+    return _oauth_metadata()
+
+
+def _protected_resource_metadata() -> ProtectedResourceMetadata:
+    """Build Protected Resource Metadata response."""
+    return ProtectedResourceMetadata(
+        resource=f"{settings.base_url}/mcp",
+        authorization_servers=[settings.base_url],
+    )
+
+
+@router.get("/.well-known/oauth-protected-resource", response_model=ProtectedResourceMetadata)
+async def protected_resource_metadata():
+    """OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
+    return _protected_resource_metadata()
+
+
+@router.get("/.well-known/oauth-protected-resource/mcp", response_model=ProtectedResourceMetadata)
+async def protected_resource_metadata_mcp():
+    """OAuth 2.0 Protected Resource Metadata for /mcp path (RFC 9728)."""
+    return _protected_resource_metadata()
 
 
 @router.post("/register", response_model=ClientRegistrationResponse)

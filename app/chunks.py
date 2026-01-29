@@ -122,6 +122,51 @@ async def list_chunks(offset: int = 0, limit: int = 50) -> tuple[list[Chunk], in
     return chunks, total
 
 
+async def get_metadata_index(top_n: int = 20) -> dict:
+    """Get aggregated metadata index: keys with their top values and counts."""
+    db = await get_db()
+
+    # Get total chunks count
+    cursor = await db.execute("SELECT COUNT(*) as count FROM chunks")
+    total = (await cursor.fetchone())["count"]
+
+    # Aggregate metadata keys and values
+    # Use UNION: one query for scalars, one for array elements
+    cursor = await db.execute(
+        """
+        SELECT key, val, SUM(count) as count FROM (
+            -- Scalar values (not arrays)
+            SELECT j.key as key, j.value as val, COUNT(*) as count
+            FROM chunks c, json_each(c.metadata) j
+            WHERE c.metadata IS NOT NULL AND j.type != 'array'
+            GROUP BY j.key, j.value
+
+            UNION ALL
+
+            -- Array elements
+            SELECT j.key as key, je.value as val, COUNT(*) as count
+            FROM chunks c, json_each(c.metadata) j, json_each(j.value) je
+            WHERE c.metadata IS NOT NULL AND j.type = 'array'
+            GROUP BY j.key, je.value
+        )
+        GROUP BY key, val
+        ORDER BY key, count DESC
+        """
+    )
+    rows = await cursor.fetchall()
+
+    # Group by key, take top_n values per key
+    keys: dict[str, list[dict]] = {}
+    for row in rows:
+        key = row["key"]
+        if key not in keys:
+            keys[key] = []
+        if len(keys[key]) < top_n:
+            keys[key].append({"value": row["val"], "count": row["count"]})
+
+    return {"total_chunks": total, "keys": keys}
+
+
 async def search_chunks(query: str, limit: int = 20) -> list[SearchResult]:
     """Full-text search across chunks."""
     # Escape each token for FTS5: wrap individual words in quotes

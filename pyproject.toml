@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
     "fastapi>=0.128.0",
-    "fastmcp>=2.14.2",
+    "fastmcp>=2.14.4",
     "jinja2>=3.1.6",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",

@@ -174,3 +174,41 @@ async def test_search_chunks_no_results(mcp_client):
     result = await mcp_client.call_tool("search_chunks", {"query": "nonexistent"})
 
     assert result.data == []
+
+
+@pytest.mark.asyncio
+async def test_get_metadata_index(mcp_client):
+    """Test get_metadata_index tool."""
+    await mcp_client.call_tool(
+        "store_chunk",
+        {"content": "Book one", "metadata": {"tags": ["book", "fiction"], "author": "Alice"}},
+    )
+    await mcp_client.call_tool(
+        "store_chunk",
+        {"content": "Book two", "metadata": {"tags": ["book", "science"], "author": "Bob"}},
+    )
+    await mcp_client.call_tool(
+        "store_chunk",
+        {"content": "No metadata"},
+    )
+
+    result = await mcp_client.call_tool("get_metadata_index", {})
+
+    assert result.data["total_chunks"] == 3
+    keys = result.data["keys"]
+    assert "tags" in keys
+    assert "author" in keys
+    # "book" tag appears in 2 chunks
+    tag_values = {v["value"]: v["count"] for v in keys["tags"]}
+    assert tag_values["book"] == 2
+    assert tag_values["fiction"] == 1
+    assert tag_values["science"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_metadata_index_empty(mcp_client):
+    """Test get_metadata_index with no chunks."""
+    result = await mcp_client.call_tool("get_metadata_index", {})
+
+    assert result.data["total_chunks"] == 0
+    assert result.data["keys"] == {}
