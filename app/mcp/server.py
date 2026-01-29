@@ -16,7 +16,9 @@ async def store_chunk(content: str, metadata: dict | None = None) -> dict:
 
     Args:
         content: The text content to store
-        metadata: Optional metadata dict (tags, source, etc.)
+        metadata: Optional metadata dict. Must be flat: only scalar values
+            or arrays of scalars. No nested objects allowed.
+            Example: {"tags": ["python", "async"], "source": "docs", "priority": 1}
 
     Returns:
         The created chunk with ID
@@ -87,7 +89,8 @@ async def update_chunk(chunk_id: str, content: str | None = None, metadata: dict
     Args:
         chunk_id: The UUID of the chunk to update
         content: New content (optional)
-        metadata: New metadata (optional)
+        metadata: New metadata (optional). Must be flat: only scalar values
+            or arrays of scalars. No nested objects allowed.
 
     Returns:
         The updated chunk if found, None otherwise
@@ -127,3 +130,20 @@ async def get_metadata_index(top_n: int = 20) -> dict:
         Dict with total_chunks count and keys mapping to their top values
     """
     return await chunks.get_metadata_index(top_n)
+
+
+@mcp.tool()
+async def get_metadata_values(key: str, top_n: int = 50) -> dict:
+    """Get all values for a specific metadata key.
+
+    Use this to drill down into a specific metadata field after seeing
+    the overview from get_metadata_index.
+
+    Args:
+        key: The metadata key to get values for (e.g., "tags", "source")
+        top_n: Maximum number of values to return (default 50)
+
+    Returns:
+        Dict with key name and list of values with counts
+    """
+    return await chunks.get_metadata_values(key, top_n)

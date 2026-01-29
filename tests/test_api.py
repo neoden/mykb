@@ -166,3 +166,55 @@ async def test_unauthorized_invalid_token(client):
         headers={"Authorization": "Bearer invalid-token"},
     )
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_nested_metadata_rejected(client, auth_headers):
+    """Test that nested objects in metadata are rejected."""
+    response = await client.post(
+        "/api/chunks",
+        json={
+            "content": "Test",
+            "metadata": {"nested": {"key": "value"}},
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+    assert "Nested objects not allowed" in response.text
+
+
+@pytest.mark.asyncio
+async def test_nested_array_metadata_rejected(client, auth_headers):
+    """Test that nested structures in metadata arrays are rejected."""
+    response = await client.post(
+        "/api/chunks",
+        json={
+            "content": "Test",
+            "metadata": {"items": [{"nested": "obj"}]},
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+    assert "Nested structures not allowed" in response.text
+
+
+@pytest.mark.asyncio
+async def test_flat_metadata_accepted(client, auth_headers):
+    """Test that flat metadata with arrays of scalars is accepted."""
+    response = await client.post(
+        "/api/chunks",
+        json={
+            "content": "Test",
+            "metadata": {
+                "tags": ["python", "async"],
+                "source": "docs",
+                "priority": 1,
+                "active": True,
+            },
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["metadata"]["tags"] == ["python", "async"]
+    assert data["metadata"]["priority"] == 1

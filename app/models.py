@@ -1,5 +1,22 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, field_validator
+
+
+def _validate_flat_metadata(metadata: dict | None) -> dict | None:
+    """Ensure metadata is flat: only scalars or lists of scalars."""
+    if metadata is None:
+        return None
+    for key, value in metadata.items():
+        if isinstance(value, dict):
+            raise ValueError(f"Nested objects not allowed in metadata (key: {key})")
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                if isinstance(item, (dict, list)):
+                    raise ValueError(
+                        f"Nested structures not allowed in metadata arrays (key: {key}, index: {i})"
+                    )
+    return metadata
 
 
 # Chunk models
@@ -7,10 +24,20 @@ class ChunkCreate(BaseModel):
     content: str
     metadata: dict | None = None
 
+    @field_validator("metadata")
+    @classmethod
+    def validate_flat_metadata(cls, v: dict | None) -> dict | None:
+        return _validate_flat_metadata(v)
+
 
 class ChunkUpdate(BaseModel):
     content: str | None = None
     metadata: dict | None = None
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_flat_metadata(cls, v: dict | None) -> dict | None:
+        return _validate_flat_metadata(v)
 
 
 class Chunk(BaseModel):

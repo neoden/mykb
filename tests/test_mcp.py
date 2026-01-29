@@ -199,10 +199,9 @@ async def test_get_metadata_index(mcp_client):
     assert "tags" in keys
     assert "author" in keys
     # "book" tag appears in 2 chunks
-    tag_values = {v["value"]: v["count"] for v in keys["tags"]}
-    assert tag_values["book"] == 2
-    assert tag_values["fiction"] == 1
-    assert tag_values["science"] == 1
+    assert keys["tags"]["book"] == 2
+    assert keys["tags"]["fiction"] == 1
+    assert keys["tags"]["science"] == 1
 
 
 @pytest.mark.asyncio
@@ -212,3 +211,43 @@ async def test_get_metadata_index_empty(mcp_client):
 
     assert result.data["total_chunks"] == 0
     assert result.data["keys"] == {}
+
+
+@pytest.mark.asyncio
+async def test_get_metadata_values(mcp_client):
+    """Test get_metadata_values for drilling down into a specific key."""
+    await mcp_client.call_tool(
+        "store_chunk",
+        {"content": "Book one", "metadata": {"tags": ["python", "async"]}},
+    )
+    await mcp_client.call_tool(
+        "store_chunk",
+        {"content": "Book two", "metadata": {"tags": ["python", "web"]}},
+    )
+    await mcp_client.call_tool(
+        "store_chunk",
+        {"content": "Book three", "metadata": {"tags": ["rust"]}},
+    )
+
+    result = await mcp_client.call_tool("get_metadata_values", {"key": "tags"})
+
+    assert result.data["key"] == "tags"
+    values = result.data["values"]
+    assert values["python"] == 2
+    assert values["async"] == 1
+    assert values["web"] == 1
+    assert values["rust"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_metadata_values_nonexistent_key(mcp_client):
+    """Test get_metadata_values for a key that doesn't exist."""
+    await mcp_client.call_tool(
+        "store_chunk",
+        {"content": "Test", "metadata": {"source": "docs"}},
+    )
+
+    result = await mcp_client.call_tool("get_metadata_values", {"key": "nonexistent"})
+
+    assert result.data["key"] == "nonexistent"
+    assert result.data["values"] == {}

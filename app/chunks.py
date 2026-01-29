@@ -156,15 +156,50 @@ async def get_metadata_index(top_n: int = 20) -> dict:
     rows = await cursor.fetchall()
 
     # Group by key, take top_n values per key
-    keys: dict[str, list[dict]] = {}
+    keys: dict[str, dict] = {}
     for row in rows:
         key = row["key"]
         if key not in keys:
-            keys[key] = []
+            keys[key] = {}
         if len(keys[key]) < top_n:
-            keys[key].append({"value": row["val"], "count": row["count"]})
+            keys[key][row["val"]] = row["count"]
 
     return {"total_chunks": total, "keys": keys}
+
+
+async def get_metadata_values(key: str, top_n: int = 50) -> dict:
+    """Get all values for a specific metadata key."""
+    db = await get_db()
+
+    cursor = await db.execute(
+        """
+        SELECT val, SUM(count) as count FROM (
+            -- Scalar values
+            SELECT j.value as val, COUNT(*) as count
+            FROM chunks c, json_each(c.metadata) j
+            WHERE c.metadata IS NOT NULL AND j.type != 'array' AND j.key = ?
+            GROUP BY j.value
+
+            UNION ALL
+
+            -- Array elements
+            SELECT je.value as val, COUNT(*) as count
+            FROM chunks c, json_each(c.metadata) j, json_each(j.value) je
+            WHERE c.metadata IS NOT NULL AND j.type = 'array' AND j.key = ?
+            GROUP BY je.value
+        )
+        GROUP BY val
+        ORDER BY count DESC
+        LIMIT ?
+        """,
+        (key, key, top_n),
+    )
+    rows = await cursor.fetchall()
+
+    return {
+        "key": key,
+        "values": {row["val"]: row["count"] for row in rows},
+    }
 
 
 async def search_chunks(query: str, limit: int = 20) -> list[SearchResult]:
