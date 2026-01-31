@@ -66,7 +66,7 @@ func (s *Server) ServeStdio() error {
 		}
 
 		// Handle request
-		resp := s.handleRequest(&req)
+		resp := s.HandleRequest(&req)
 		if resp != nil {
 			if err := encoder.Encode(resp); err != nil {
 				log.Printf("Write error: %v", err)
@@ -75,7 +75,9 @@ func (s *Server) ServeStdio() error {
 	}
 }
 
-func (s *Server) handleRequest(req *Request) *Response {
+// HandleRequest processes a single MCP request and returns a response.
+// Returns nil for notifications (requests without an ID).
+func (s *Server) HandleRequest(req *Request) *Response {
 	log.Printf("Request: %s", req.Method)
 
 	// Notifications have no id and expect no response

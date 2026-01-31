@@ -47,7 +47,7 @@ func call(t *testing.T, s *Server, method string, params interface{}) json.RawMe
 	}
 
 	// Use handleRequest directly
-	resp := s.handleRequest(req)
+	resp := s.HandleRequest(req)
 	if resp == nil {
 		t.Fatal("Expected response, got nil")
 	}
@@ -81,7 +81,7 @@ func callExpectError(t *testing.T, s *Server, method string, params interface{})
 		Params:  paramsRaw,
 	}
 
-	resp := s.handleRequest(req)
+	resp := s.HandleRequest(req)
 	if resp == nil {
 		t.Fatal("Expected response, got nil")
 	}
@@ -412,7 +412,7 @@ func TestNotificationNoResponse(t *testing.T) {
 		// No ID = notification
 	}
 
-	resp := s.handleRequest(req)
+	resp := s.HandleRequest(req)
 	if resp != nil {
 		t.Error("Notifications should not return response")
 	}
@@ -428,6 +428,84 @@ func TestPing(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	// Empty object is valid response
+}
+
+func TestToolsCallGetMetadataValues(t *testing.T) {
+	s := setupTestServer(t)
+
+	// Store chunks with metadata
+	call(t, s, "tools/call", map[string]interface{}{
+		"name": "store_chunk",
+		"arguments": map[string]interface{}{
+			"content":  "A",
+			"metadata": map[string]interface{}{"lang": "go"},
+		},
+	})
+	call(t, s, "tools/call", map[string]interface{}{
+		"name": "store_chunk",
+		"arguments": map[string]interface{}{
+			"content":  "B",
+			"metadata": map[string]interface{}{"lang": "python"},
+		},
+	})
+
+	result := call(t, s, "tools/call", map[string]interface{}{
+		"name": "get_metadata_values",
+		"arguments": map[string]interface{}{
+			"key": "lang",
+		},
+	})
+
+	var callResult CallToolResult
+	json.Unmarshal(result, &callResult)
+
+	if callResult.IsError {
+		t.Error("Expected success")
+	}
+
+	data, _ := json.Marshal(callResult.StructuredContent)
+	var values map[string]interface{}
+	json.Unmarshal(data, &values)
+
+	if values["key"] != "lang" {
+		t.Errorf("key = %v, want lang", values["key"])
+	}
+}
+
+func TestToolsCallMissingRequiredParam(t *testing.T) {
+	s := setupTestServer(t)
+
+	// store_chunk without content
+	result := call(t, s, "tools/call", map[string]interface{}{
+		"name":      "store_chunk",
+		"arguments": map[string]interface{}{},
+	})
+
+	var callResult CallToolResult
+	json.Unmarshal(result, &callResult)
+
+	if !callResult.IsError {
+		t.Error("Expected error for missing content")
+	}
+}
+
+func TestToolsCallGetChunkNotFound(t *testing.T) {
+	s := setupTestServer(t)
+
+	result := call(t, s, "tools/call", map[string]interface{}{
+		"name": "get_chunk",
+		"arguments": map[string]interface{}{
+			"chunk_id": "nonexistent-id",
+		},
+	})
+
+	var callResult CallToolResult
+	json.Unmarshal(result, &callResult)
+
+	// Should succeed but return null
+	if callResult.IsError {
+		t.Error("Should not be error, just null result")
+	}
 }
 
 func TestServeStdio(t *testing.T) {

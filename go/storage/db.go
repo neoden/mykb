@@ -127,6 +127,32 @@ type migration struct {
 }
 
 var migrations = []migration{
-	// Add migrations here as needed
-	// {"001_example", "ALTER TABLE ..."},
+	{
+		"001_settings",
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);`,
+	},
+	{
+		"002_tokens",
+		`CREATE TABLE IF NOT EXISTS tokens (
+			hash TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			client_id TEXT NOT NULL,
+			expires_at INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_tokens_expires ON tokens(expires_at);
+		CREATE INDEX IF NOT EXISTS idx_tokens_type ON tokens(type, expires_at);`,
+	},
+	{
+		"003_oauth_clients",
+		`CREATE TABLE IF NOT EXISTS oauth_clients (
+			client_id TEXT PRIMARY KEY,
+			client_name TEXT,
+			redirect_uris TEXT NOT NULL,
+			created_at INTEGER DEFAULT (unixepoch()),
+			last_used_at INTEGER DEFAULT (unixepoch())
+		);`,
+	},
 }

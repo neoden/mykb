@@ -79,9 +79,10 @@ Uses dynamic client registration (RFC 7591) + Authorization Code + PKCE:
 - `store_chunk(content, metadata?)` - Store text with optional metadata
 - `search_chunks(query, limit?)` - Full-text search with FTS5
 - `get_chunk(chunk_id)` - Get by ID
-- `list_chunks(offset?, limit?)` - Paginated list
 - `update_chunk(chunk_id, content?, metadata?)` - Update existing
 - `delete_chunk(chunk_id)` - Delete by ID
+- `get_metadata_index(top_n?)` - Overview of metadata keys and values
+- `get_metadata_values(key, top_n?)` - Drill down into specific metadata key
 
 ## REST API
 
