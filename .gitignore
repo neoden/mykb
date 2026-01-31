@@ -21,3 +21,9 @@ Caddyfile
 # IDE
 .idea/
 .vscode/
+
+# Configs
+.mcp.json
+
+# Work docs
+TODO.md
