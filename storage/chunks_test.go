@@ -246,6 +246,26 @@ func TestSearchChunksLimit(t *testing.T) {
 	}
 }
 
+func TestSearchChunksMaxLimit(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create 105 chunks
+	for i := 0; i < 105; i++ {
+		db.CreateChunk("searchable content here", nil)
+	}
+
+	// Request more than max limit
+	results, err := db.SearchChunks("searchable", 500)
+	if err != nil {
+		t.Fatalf("SearchChunks: %v", err)
+	}
+
+	// Should be capped at 100
+	if len(results) != 100 {
+		t.Errorf("len(results) = %d, want 100 (max limit)", len(results))
+	}
+}
+
 func TestSearchChunksMetadata(t *testing.T) {
 	db := setupTestDB(t)
 

@@ -182,7 +182,7 @@ func setPassword() {
 }
 
 func openDB(dataDir string) *storage.DB {
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 

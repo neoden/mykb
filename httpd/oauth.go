@@ -47,6 +47,33 @@ type tokenResponse struct {
 	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
+// validateRedirectURI checks that a redirect URI is safe.
+// Allows https://* and http://localhost only.
+func validateRedirectURI(uri string) error {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return fmt.Errorf("invalid URL")
+	}
+
+	switch parsed.Scheme {
+	case "https":
+		// OK
+	case "http":
+		host := parsed.Hostname()
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return fmt.Errorf("http only allowed for localhost")
+		}
+	default:
+		return fmt.Errorf("scheme must be http or https")
+	}
+
+	if parsed.Fragment != "" {
+		return fmt.Errorf("fragment not allowed")
+	}
+
+	return nil
+}
+
 func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, oauthMetadata{
 		Issuer:                        s.config.BaseURL,
@@ -76,6 +103,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if len(req.RedirectURIs) == 0 {
 		writeError(w, http.StatusBadRequest, "redirect_uris required")
 		return
+	}
+
+	// Validate redirect URIs
+	for _, uri := range req.RedirectURIs {
+		if err := validateRedirectURI(uri); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid redirect_uri: "+err.Error())
+			return
+		}
 	}
 
 	// Cleanup stale clients
@@ -136,20 +171,19 @@ func (s *Server) handleAuthorizeGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate CSRF token
+	// Generate CSRF token with bound parameters
 	csrfToken := GenerateToken()
-	s.csrfTokens.Store(csrfToken, nil, 5*time.Minute)
+	s.csrfTokens.Store(csrfToken, map[string]string{
+		"client_id":             clientID,
+		"redirect_uri":          redirectURI,
+		"code_challenge":        codeChallenge,
+		"code_challenge_method": codeChallengeMethod,
+		"state":                 state,
+	}, 5*time.Minute)
 
 	// Render login form
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, authorizePage,
-		html.EscapeString(clientID),
-		html.EscapeString(redirectURI),
-		html.EscapeString(codeChallenge),
-		html.EscapeString(codeChallengeMethod),
-		html.EscapeString(state),
-		html.EscapeString(csrfToken),
-	)
+	fmt.Fprintf(w, authorizePage, html.EscapeString(csrfToken))
 }
 
 func (s *Server) handleAuthorizePost(w http.ResponseWriter, r *http.Request) {
@@ -158,20 +192,22 @@ func (s *Server) handleAuthorizePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientID := r.FormValue("client_id")
-	redirectURI := r.FormValue("redirect_uri")
-	codeChallenge := r.FormValue("code_challenge")
-	codeChallengeMethod := r.FormValue("code_challenge_method")
-	state := r.FormValue("state")
 	csrfToken := r.FormValue("csrf_token")
 	password := r.FormValue("password")
 
-	// Verify CSRF
-	if !s.csrfTokens.Validate(csrfToken) {
+	// Verify and consume CSRF token, extract bound parameters
+	csrfData, ok := s.csrfTokens.Get(csrfToken)
+	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid or expired CSRF token")
 		return
 	}
-	s.csrfTokens.Get(csrfToken) // consume it
+
+	// Use parameters bound to CSRF token (not from form - prevents tampering)
+	clientID := csrfData["client_id"]
+	redirectURI := csrfData["redirect_uri"]
+	codeChallenge := csrfData["code_challenge"]
+	codeChallengeMethod := csrfData["code_challenge_method"]
+	state := csrfData["state"]
 
 	// Verify password
 	storedHash, err := s.db.GetPasswordHash()
@@ -353,11 +389,6 @@ const authorizePage = `<!DOCTYPE html>
     <h1>Authorize Access</h1>
     <p class="info">An application is requesting access to your MyKB data.</p>
     <form method="POST" action="/authorize">
-        <input type="hidden" name="client_id" value="%s">
-        <input type="hidden" name="redirect_uri" value="%s">
-        <input type="hidden" name="code_challenge" value="%s">
-        <input type="hidden" name="code_challenge_method" value="%s">
-        <input type="hidden" name="state" value="%s">
         <input type="hidden" name="csrf_token" value="%s">
         <input type="password" name="password" placeholder="Enter password" required autofocus>
         <button type="submit">Authorize</button>

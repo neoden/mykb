@@ -8,11 +8,14 @@ import (
 	"github.com/neoden/mykb/mcp"
 )
 
+const maxBodySize = 1 << 20 // 1 MB
+
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
-	// Read request body
+	// Read request body with size limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed to read request")
+		writeError(w, http.StatusRequestEntityTooLarge, "request too large")
 		return
 	}
 

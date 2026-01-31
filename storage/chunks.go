@@ -143,6 +143,8 @@ func (db *DB) DeleteChunk(id string) (bool, error) {
 func (db *DB) SearchChunks(query string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 20
+	} else if limit > 100 {
+		limit = 100
 	}
 
 	// Escape tokens for FTS5

@@ -38,23 +38,25 @@ func DefaultConfig() *Config {
 
 // Server is the HTTP server.
 type Server struct {
-	db         *storage.DB
-	mcp        *mcp.Server
-	config     *Config
-	authCodes  *MemoryTokenStore
-	csrfTokens *MemoryTokenStore
-	mux        *http.ServeMux
+	db          *storage.DB
+	mcp         *mcp.Server
+	config      *Config
+	authCodes   *MemoryTokenStore
+	csrfTokens  *MemoryTokenStore
+	rateLimiter *IPRateLimiter
+	mux         *http.ServeMux
 }
 
 // NewServer creates a new HTTP server.
 func NewServer(db *storage.DB, config *Config) *Server {
 	s := &Server{
-		db:         db,
-		mcp:        mcp.NewServer(db),
-		config:     config,
-		authCodes:  NewMemoryTokenStore(),
-		csrfTokens: NewMemoryTokenStore(),
-		mux:        http.NewServeMux(),
+		db:          db,
+		mcp:         mcp.NewServer(db),
+		config:      config,
+		authCodes:   NewMemoryTokenStore(),
+		csrfTokens:  NewMemoryTokenStore(),
+		rateLimiter: NewIPRateLimiter(10, 20), // 10 req/sec, burst 20
+		mux:         http.NewServeMux(),
 	}
 	s.registerRoutes()
 	return s
@@ -67,11 +69,11 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.handleProtectedResourceMetadata)
 	s.mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.handleProtectedResourceMetadata)
 
-	// OAuth endpoints
-	s.mux.HandleFunc("POST /register", s.handleRegister)
+	// OAuth endpoints (rate limited)
+	s.mux.HandleFunc("POST /register", s.rateLimiter.RateLimit(s.handleRegister))
 	s.mux.HandleFunc("GET /authorize", s.handleAuthorizeGet)
-	s.mux.HandleFunc("POST /authorize", s.handleAuthorizePost)
-	s.mux.HandleFunc("POST /token", s.handleToken)
+	s.mux.HandleFunc("POST /authorize", s.rateLimiter.RateLimit(s.handleAuthorizePost))
+	s.mux.HandleFunc("POST /token", s.rateLimiter.RateLimit(s.handleToken))
 
 	// MCP endpoint
 	s.mux.HandleFunc("POST /mcp", s.requireAuth(s.handleMCP))
@@ -87,7 +89,16 @@ func (s *Server) ListenAndServe() error {
 	}
 	log.Printf("HTTP server listening on %s", s.config.Listen)
 	log.Printf("Base URL: %s", s.config.BaseURL)
-	return http.ListenAndServe(s.config.Listen, s.mux)
+
+	server := &http.Server{
+		Addr:              s.config.Listen,
+		Handler:           s.mux,
+		ReadTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return server.ListenAndServe()
 }
 
 func (s *Server) listenAndServeTLS() error {
@@ -99,8 +110,12 @@ func (s *Server) listenAndServeTLS() error {
 
 	// HTTPS server
 	server := &http.Server{
-		Addr:    ":443",
-		Handler: s.mux,
+		Addr:              ":443",
+		Handler:           s.mux,
+		ReadTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 		TLSConfig: &tls.Config{
 			GetCertificate: manager.GetCertificate,
 			MinVersion:     tls.VersionTLS13,

@@ -28,9 +28,12 @@ func NewMemoryTokenStore() *MemoryTokenStore {
 }
 
 // GenerateToken creates a cryptographically secure random token.
+// Panics if the system's secure random number generator fails.
 func GenerateToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 

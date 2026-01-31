@@ -18,6 +18,9 @@ Caddyfile
 # Data
 *.db
 
+# Build/test output
+*.out
+
 # IDE
 .idea/
 .vscode/
