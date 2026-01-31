@@ -63,18 +63,16 @@ func usage() {
 
 Usage:
   mykb serve stdio                  Run MCP server over stdio
-  mykb serve http [--listen PORT]   Run HTTP server on localhost (dev mode)
-  mykb serve http --domain DOMAIN   Run HTTPS server with auto TLS
-  mykb set-password                 Set password for HTTP auth
+  mykb serve http [--listen PORT]    Run HTTP on localhost (dev, default :8080)
+  mykb serve http --domain DOMAIN   Run HTTPS with auto TLS (production)
+  mykb set-password                 Set password for auth
 
 Options:
   --data DIR       Data directory (default: ~/.local/share/mykb, env: MYKB_DATA)
-  -h, --help       Show this help
-  -v, --version    Print version
 
-HTTP options:
-  --listen PORT    Port for HTTP mode, binds to localhost only (default: :8080, env: MYKB_LISTEN)
-  --domain DOMAIN  Domain for HTTPS with Let's Encrypt (env: MYKB_DOMAIN)
+HTTP transport options (mutually exclusive):
+  --listen PORT    HTTP on localhost only (env: MYKB_LISTEN)
+  --domain DOMAIN  HTTPS with Let's Encrypt (env: MYKB_DOMAIN)
   --behind-proxy   Trust X-Forwarded-For header (env: MYKB_BEHIND_PROXY=1)`)
 }
 
@@ -91,10 +89,18 @@ func serveStdio(args []string) {
 
 func serveHTTP(args []string) {
 	fs := flag.NewFlagSet("serve http", flag.ExitOnError)
-	listen := fs.String("listen", envOr("MYKB_LISTEN", ":8080"), "Listen address (HTTP mode)")
-	domain := fs.String("domain", os.Getenv("MYKB_DOMAIN"), "Domain for HTTPS with auto TLS")
+	listen := fs.String("listen", os.Getenv("MYKB_LISTEN"), "Listen address for HTTP (localhost only, dev mode)")
+	domain := fs.String("domain", os.Getenv("MYKB_DOMAIN"), "Domain for HTTPS with auto TLS (production)")
 	behindProxy := fs.Bool("behind-proxy", os.Getenv("MYKB_BEHIND_PROXY") == "1", "Trust X-Forwarded-For for client IP")
 	fs.Parse(args)
+
+	if *listen != "" && *domain != "" {
+		fmt.Fprintln(os.Stderr, "Error: --listen and --domain are mutually exclusive")
+		os.Exit(1)
+	}
+	if *listen == "" && *domain == "" {
+		*listen = ":8080"
+	}
 
 	db := openDB(dataDir)
 	defer db.Close()
@@ -112,9 +118,11 @@ func serveHTTP(args []string) {
 
 	if *domain != "" {
 		config.BaseURL = "https://" + *domain
+		log.Printf("Starting HTTPS server for %s", *domain)
 	} else {
 		// HTTP mode: force localhost only (no TLS = no public exposure)
 		config.Listen, config.BaseURL = httpd.LocalhostAddr(*listen)
+		log.Printf("Starting HTTP server on %s (dev mode)", config.Listen)
 	}
 
 	server := httpd.NewServer(db, config)
