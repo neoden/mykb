@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/neoden/mykb/mcp"
 )
@@ -11,6 +12,13 @@ import (
 const maxBodySize = 1 << 20 // 1 MB
 
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
+	// Validate Content-Type
+	ct := r.Header.Get("Content-Type")
+	if ct != "" && !strings.HasPrefix(ct, "application/json") {
+		writeError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+		return
+	}
+
 	// Read request body with size limit
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	body, err := io.ReadAll(r.Body)

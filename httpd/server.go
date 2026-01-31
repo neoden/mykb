@@ -16,10 +16,11 @@ import (
 
 // Config holds HTTP server configuration.
 type Config struct {
-	Listen    string // HTTP listen address (used when Domain is empty)
-	Domain    string // Domain for HTTPS with auto TLS
-	CertCache string // Directory to cache TLS certificates
-	BaseURL   string // Base URL for OAuth endpoints
+	Listen      string // HTTP listen address (used when Domain is empty)
+	Domain      string // Domain for HTTPS with auto TLS
+	CertCache   string // Directory to cache TLS certificates
+	BaseURL     string // Base URL for OAuth endpoints
+	BehindProxy bool   // Trust X-Forwarded-For header for client IP
 
 	TokenExpiry        time.Duration
 	RefreshTokenExpiry time.Duration
@@ -41,8 +42,6 @@ type Server struct {
 	db          *storage.DB
 	mcp         *mcp.Server
 	config      *Config
-	authCodes   *MemoryTokenStore
-	csrfTokens  *MemoryTokenStore
 	rateLimiter *IPRateLimiter
 	mux         *http.ServeMux
 }
@@ -53,9 +52,7 @@ func NewServer(db *storage.DB, config *Config) *Server {
 		db:          db,
 		mcp:         mcp.NewServer(db),
 		config:      config,
-		authCodes:   NewMemoryTokenStore(),
-		csrfTokens:  NewMemoryTokenStore(),
-		rateLimiter: NewIPRateLimiter(10, 20), // 10 req/sec, burst 20
+		rateLimiter: NewIPRateLimiter(0.1, 3, config.BehindProxy), // 1 req/10sec, burst 3
 		mux:         http.NewServeMux(),
 	}
 	s.registerRoutes()
@@ -157,6 +154,7 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
+			log.Printf("AUTH FAILED: missing token from %s", getIP(r))
 			w.Header().Set("WWW-Authenticate", `Bearer realm="mykb"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing token"})
 			return
@@ -167,6 +165,7 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		_, err := s.db.ValidateToken(hash, storage.TokenAccess)
 		if err != nil {
+			log.Printf("AUTH FAILED: invalid token from %s", getIP(r))
 			w.Header().Set("WWW-Authenticate", `Bearer realm="mykb", error="invalid_token"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid token"})
 			return
@@ -184,4 +183,16 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// LocalhostAddr extracts port from addr and returns localhost binding.
+// Used to force HTTP mode to bind only to localhost for security.
+func LocalhostAddr(addr string) (listen, baseURL string) {
+	port := addr
+	if len(port) > 0 && port[0] == ':' {
+		port = port[1:]
+	} else if idx := strings.LastIndex(port, ":"); idx != -1 {
+		port = port[idx+1:]
+	}
+	return "127.0.0.1:" + port, "http://localhost:" + port
 }

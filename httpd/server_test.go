@@ -216,7 +216,7 @@ func TestMCPWithValidToken(t *testing.T) {
 	token := GenerateToken()
 	hash := storage.HashToken(token)
 	expiry := time.Now().Add(time.Hour).Unix()
-	db.StoreToken(hash, storage.TokenAccess, "client", expiry)
+	db.StoreToken(hash, storage.TokenAccess, "client", expiry, nil)
 
 	req := httptest.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -349,13 +349,16 @@ func TestAuthorizePostNoPasswordConfigured(t *testing.T) {
 
 	// Store a CSRF token manually
 	csrfToken := GenerateToken()
-	server.csrfTokens.Store(csrfToken, nil, time.Minute)
+	csrfExpiry := time.Now().Add(time.Minute).Unix()
+	db.StoreToken(storage.HashToken(csrfToken), storage.TokenCSRF, "test-client", csrfExpiry, map[string]string{
+		"client_id":             "test-client",
+		"redirect_uri":          "http://localhost/callback",
+		"code_challenge":        "abc",
+		"code_challenge_method": "S256",
+		"state":                 "",
+	})
 
 	form := url.Values{}
-	form.Set("client_id", "test-client")
-	form.Set("redirect_uri", "http://localhost/callback")
-	form.Set("code_challenge", "abc")
-	form.Set("code_challenge_method", "S256")
 	form.Set("csrf_token", csrfToken)
 	form.Set("password", "anypassword")
 
@@ -698,6 +701,26 @@ func TestTokenInvalidForm(t *testing.T) {
 	}
 }
 
+func TestMCPInvalidContentType(t *testing.T) {
+	server, db := setupTestServer(t)
+
+	token := GenerateToken()
+	hash := storage.HashToken(token)
+	expiry := time.Now().Add(time.Hour).Unix()
+	db.StoreToken(hash, storage.TokenAccess, "client", expiry, nil)
+
+	req := httptest.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnsupportedMediaType)
+	}
+}
+
 func TestMCPParseError(t *testing.T) {
 	server, db := setupTestServer(t)
 
@@ -705,7 +728,7 @@ func TestMCPParseError(t *testing.T) {
 	token := GenerateToken()
 	hash := storage.HashToken(token)
 	expiry := time.Now().Add(time.Hour).Unix()
-	db.StoreToken(hash, storage.TokenAccess, "client", expiry)
+	db.StoreToken(hash, storage.TokenAccess, "client", expiry, nil)
 
 	req := httptest.NewRequest("POST", "/mcp", strings.NewReader(`{invalid json`))
 	req.Header.Set("Content-Type", "application/json")
@@ -841,5 +864,46 @@ func TestFullOAuthFlow(t *testing.T) {
 	}
 	if refreshResp.AccessToken == tokenResp.AccessToken {
 		t.Error("New access token should be different")
+	}
+}
+
+func TestLocalhostAddr(t *testing.T) {
+	tests := []struct {
+		addr        string
+		wantListen  string
+		wantBaseURL string
+	}{
+		{":8080", "127.0.0.1:8080", "http://localhost:8080"},
+		{":9000", "127.0.0.1:9000", "http://localhost:9000"},
+		{"8080", "127.0.0.1:8080", "http://localhost:8080"},
+		{"0.0.0.0:8080", "127.0.0.1:8080", "http://localhost:8080"},
+		{"192.168.1.1:3000", "127.0.0.1:3000", "http://localhost:3000"},
+	}
+
+	for _, tt := range tests {
+		listen, baseURL := LocalhostAddr(tt.addr)
+		if listen != tt.wantListen {
+			t.Errorf("LocalhostAddr(%q) listen = %q, want %q", tt.addr, listen, tt.wantListen)
+		}
+		if baseURL != tt.wantBaseURL {
+			t.Errorf("LocalhostAddr(%q) baseURL = %q, want %q", tt.addr, baseURL, tt.wantBaseURL)
+		}
+	}
+}
+
+func TestLocalhostAddrIgnoresExternalBindings(t *testing.T) {
+	// Verify that any attempt to bind to external addresses is forced to localhost
+	externalAddrs := []string{
+		"0.0.0.0:8080",
+		"192.168.1.100:8080",
+		"10.0.0.1:8080",
+		"[::]:8080",
+	}
+
+	for _, addr := range externalAddrs {
+		listen, _ := LocalhostAddr(addr)
+		if !strings.HasPrefix(listen, "127.0.0.1:") {
+			t.Errorf("LocalhostAddr(%q) = %q, should bind to 127.0.0.1", addr, listen)
+		}
 	}
 }

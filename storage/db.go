@@ -155,4 +155,8 @@ var migrations = []migration{
 			last_used_at INTEGER DEFAULT (unixepoch())
 		);`,
 	},
+	{
+		"004_tokens_data",
+		`ALTER TABLE tokens ADD COLUMN data TEXT;`,
+	},
 }

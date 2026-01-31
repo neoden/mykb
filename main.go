@@ -63,7 +63,7 @@ func usage() {
 
 Usage:
   mykb serve stdio                  Run MCP server over stdio
-  mykb serve http [--listen ADDR]   Run HTTP server (dev mode)
+  mykb serve http [--listen PORT]   Run HTTP server on localhost (dev mode)
   mykb serve http --domain DOMAIN   Run HTTPS server with auto TLS
   mykb set-password                 Set password for HTTP auth
 
@@ -73,8 +73,9 @@ Options:
   -v, --version    Print version
 
 HTTP options:
-  --listen ADDR    Listen address for HTTP mode (default: :8080, env: MYKB_LISTEN)
-  --domain DOMAIN  Domain for HTTPS with Let's Encrypt (env: MYKB_DOMAIN)`)
+  --listen PORT    Port for HTTP mode, binds to localhost only (default: :8080, env: MYKB_LISTEN)
+  --domain DOMAIN  Domain for HTTPS with Let's Encrypt (env: MYKB_DOMAIN)
+  --behind-proxy   Trust X-Forwarded-For header (env: MYKB_BEHIND_PROXY=1)`)
 }
 
 func serveStdio(args []string) {
@@ -92,6 +93,7 @@ func serveHTTP(args []string) {
 	fs := flag.NewFlagSet("serve http", flag.ExitOnError)
 	listen := fs.String("listen", envOr("MYKB_LISTEN", ":8080"), "Listen address (HTTP mode)")
 	domain := fs.String("domain", os.Getenv("MYKB_DOMAIN"), "Domain for HTTPS with auto TLS")
+	behindProxy := fs.Bool("behind-proxy", os.Getenv("MYKB_BEHIND_PROXY") == "1", "Trust X-Forwarded-For for client IP")
 	fs.Parse(args)
 
 	db := openDB(dataDir)
@@ -106,17 +108,13 @@ func serveHTTP(args []string) {
 	config := httpd.DefaultConfig()
 	config.Domain = *domain
 	config.CertCache = filepath.Join(dataDir, "certs")
+	config.BehindProxy = *behindProxy
 
 	if *domain != "" {
 		config.BaseURL = "https://" + *domain
 	} else {
-		config.Listen = *listen
-		// Build base URL from listen address
-		addr := *listen
-		if addr[0] == ':' {
-			addr = "localhost" + addr
-		}
-		config.BaseURL = "http://" + addr
+		// HTTP mode: force localhost only (no TLS = no public exposure)
+		config.Listen, config.BaseURL = httpd.LocalhostAddr(*listen)
 	}
 
 	server := httpd.NewServer(db, config)

@@ -1,6 +1,7 @@
 package httpd
 
 import (
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -11,10 +12,13 @@ import (
 
 // IPRateLimiter limits requests per IP address.
 type IPRateLimiter struct {
-	mu       sync.Mutex
-	limiters map[string]*visitorLimiter
-	rate     rate.Limit
-	burst    int
+	mu          sync.Mutex
+	limiters    map[string]*visitorLimiter
+	rate        rate.Limit
+	burst       int
+	behindProxy bool
+	warnedProxy bool // log warning only once
+	stop        chan struct{}
 }
 
 type visitorLimiter struct {
@@ -23,14 +27,22 @@ type visitorLimiter struct {
 }
 
 // NewIPRateLimiter creates a rate limiter with r requests/second and burst size b.
-func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
+// If behindProxy is true, trusts X-Forwarded-For header for client IP.
+func NewIPRateLimiter(r rate.Limit, b int, behindProxy bool) *IPRateLimiter {
 	rl := &IPRateLimiter{
-		limiters: make(map[string]*visitorLimiter),
-		rate:     r,
-		burst:    b,
+		limiters:    make(map[string]*visitorLimiter),
+		rate:        r,
+		burst:       b,
+		behindProxy: behindProxy,
+		stop:        make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
+}
+
+// Stop stops the cleanup goroutine.
+func (rl *IPRateLimiter) Stop() {
+	close(rl.stop)
 }
 
 func (rl *IPRateLimiter) getLimiter(ip string) *rate.Limiter {
@@ -55,42 +67,27 @@ func (rl *IPRateLimiter) Allow(ip string) bool {
 
 // cleanup removes stale entries every minute.
 func (rl *IPRateLimiter) cleanup() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
 	for {
-		time.Sleep(time.Minute)
-		rl.mu.Lock()
-		for ip, v := range rl.limiters {
-			if time.Since(v.lastSeen) > 3*time.Minute {
-				delete(rl.limiters, ip)
+		select {
+		case <-rl.stop:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			for ip, v := range rl.limiters {
+				if time.Since(v.lastSeen) > 3*time.Minute {
+					delete(rl.limiters, ip)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
 
 // getIP extracts client IP from request.
 func getIP(r *http.Request) string {
-	// Check X-Forwarded-For (first IP is the client)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if ip, _, err := net.SplitHostPort(xff); err == nil {
-			return ip
-		}
-		// No port in header
-		if i := len(xff); i > 0 {
-			for j := 0; j < i; j++ {
-				if xff[j] == ',' {
-					return xff[:j]
-				}
-			}
-			return xff
-		}
-	}
-
-	// Check X-Real-IP
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -98,10 +95,39 @@ func getIP(r *http.Request) string {
 	return ip
 }
 
+// getIPFromXFF extracts first IP from X-Forwarded-For header.
+func getIPFromXFF(xff string) string {
+	for i := 0; i < len(xff); i++ {
+		if xff[i] == ',' {
+			return xff[:i]
+		}
+	}
+	return xff
+}
+
 // RateLimit wraps a handler with rate limiting.
 func (rl *IPRateLimiter) RateLimit(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := getIP(r)
+		var ip string
+		xff := r.Header.Get("X-Forwarded-For")
+
+		if rl.behindProxy && xff != "" {
+			ip = getIPFromXFF(xff)
+		} else {
+			ip = getIP(r)
+			// Warn if we see XFF but are not configured to trust it
+			if xff != "" && !rl.warnedProxy {
+				rl.mu.Lock()
+				if !rl.warnedProxy {
+					log.Printf("WARNING: X-Forwarded-For header detected but --behind-proxy not set. " +
+						"If behind a proxy, all clients will share one rate limit. " +
+						"Use --behind-proxy flag if running behind a reverse proxy.")
+					rl.warnedProxy = true
+				}
+				rl.mu.Unlock()
+			}
+		}
+
 		if !rl.Allow(ip) {
 			w.Header().Set("Retry-After", "1")
 			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")

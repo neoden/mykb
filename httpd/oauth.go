@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -173,13 +174,14 @@ func (s *Server) handleAuthorizeGet(w http.ResponseWriter, r *http.Request) {
 
 	// Generate CSRF token with bound parameters
 	csrfToken := GenerateToken()
-	s.csrfTokens.Store(csrfToken, map[string]string{
+	csrfExpiry := time.Now().Add(5 * time.Minute).Unix()
+	s.db.StoreToken(storage.HashToken(csrfToken), storage.TokenCSRF, clientID, csrfExpiry, map[string]string{
 		"client_id":             clientID,
 		"redirect_uri":          redirectURI,
 		"code_challenge":        codeChallenge,
 		"code_challenge_method": codeChallengeMethod,
 		"state":                 state,
-	}, 5*time.Minute)
+	})
 
 	// Render login form
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -196,18 +198,18 @@ func (s *Server) handleAuthorizePost(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 
 	// Verify and consume CSRF token, extract bound parameters
-	csrfData, ok := s.csrfTokens.Get(csrfToken)
-	if !ok {
+	csrf, err := s.db.ConsumeToken(storage.HashToken(csrfToken), storage.TokenCSRF)
+	if err != nil || csrf == nil {
 		writeError(w, http.StatusBadRequest, "invalid or expired CSRF token")
 		return
 	}
 
 	// Use parameters bound to CSRF token (not from form - prevents tampering)
-	clientID := csrfData["client_id"]
-	redirectURI := csrfData["redirect_uri"]
-	codeChallenge := csrfData["code_challenge"]
-	codeChallengeMethod := csrfData["code_challenge_method"]
-	state := csrfData["state"]
+	clientID := csrf.Data["client_id"]
+	redirectURI := csrf.Data["redirect_uri"]
+	codeChallenge := csrf.Data["code_challenge"]
+	codeChallengeMethod := csrf.Data["code_challenge_method"]
+	state := csrf.Data["state"]
 
 	// Verify password
 	storedHash, err := s.db.GetPasswordHash()
@@ -217,18 +219,20 @@ func (s *Server) handleAuthorizePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password)); err != nil {
+		log.Printf("AUTH FAILED: invalid password from %s for client %s", getIP(r), clientID)
 		writeError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
 
 	// Generate authorization code
 	code := GenerateToken()
-	s.authCodes.Store(code, map[string]string{
+	codeExpiry := time.Now().Add(s.config.CodeExpiry).Unix()
+	s.db.StoreToken(storage.HashToken(code), storage.TokenAuthCode, clientID, codeExpiry, map[string]string{
 		"client_id":             clientID,
 		"redirect_uri":          redirectURI,
 		"code_challenge":        codeChallenge,
 		"code_challenge_method": codeChallengeMethod,
-	}, s.config.CodeExpiry)
+	})
 
 	// Redirect back to client
 	redirectURL, _ := url.Parse(redirectURI)
@@ -272,25 +276,25 @@ func (s *Server) handleTokenAuthCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get and consume authorization code
-	codeData, ok := s.authCodes.Get(code)
-	if !ok {
+	authCode, err := s.db.ConsumeToken(storage.HashToken(code), storage.TokenAuthCode)
+	if err != nil || authCode == nil {
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return
 	}
 
 	// Validate code data
-	if codeData["client_id"] != clientID {
+	if authCode.Data["client_id"] != clientID {
 		writeError(w, http.StatusBadRequest, "client_id mismatch")
 		return
 	}
-	if codeData["redirect_uri"] != redirectURI {
+	if authCode.Data["redirect_uri"] != redirectURI {
 		writeError(w, http.StatusBadRequest, "redirect_uri mismatch")
 		return
 	}
 
 	// Verify PKCE
 	expectedChallenge := HashPKCE(codeVerifier)
-	if subtle.ConstantTimeCompare([]byte(expectedChallenge), []byte(codeData["code_challenge"])) != 1 {
+	if subtle.ConstantTimeCompare([]byte(expectedChallenge), []byte(authCode.Data["code_challenge"])) != 1 {
 		writeError(w, http.StatusBadRequest, "invalid code_verifier")
 		return
 	}
@@ -304,11 +308,11 @@ func (s *Server) handleTokenAuthCode(w http.ResponseWriter, r *http.Request) {
 	accessExpiry := now.Add(s.config.TokenExpiry).Unix()
 	refreshExpiry := now.Add(s.config.RefreshTokenExpiry).Unix()
 
-	if err := s.db.StoreToken(storage.HashToken(accessToken), storage.TokenAccess, clientID, accessExpiry); err != nil {
+	if err := s.db.StoreToken(storage.HashToken(accessToken), storage.TokenAccess, clientID, accessExpiry, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store token")
 		return
 	}
-	if err := s.db.StoreToken(storage.HashToken(refreshToken), storage.TokenRefresh, clientID, refreshExpiry); err != nil {
+	if err := s.db.StoreToken(storage.HashToken(refreshToken), storage.TokenRefresh, clientID, refreshExpiry, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store token")
 		return
 	}
@@ -335,6 +339,7 @@ func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 	hash := storage.HashToken(refreshToken)
 	token, err := s.db.ValidateToken(hash, storage.TokenRefresh)
 	if err != nil {
+		log.Printf("AUTH FAILED: invalid refresh token from %s", getIP(r))
 		writeError(w, http.StatusBadRequest, "invalid or expired refresh_token")
 		return
 	}
@@ -350,11 +355,11 @@ func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 	accessExpiry := now.Add(s.config.TokenExpiry).Unix()
 	refreshExpiry := now.Add(s.config.RefreshTokenExpiry).Unix()
 
-	if err := s.db.StoreToken(storage.HashToken(newAccessToken), storage.TokenAccess, token.ClientID, accessExpiry); err != nil {
+	if err := s.db.StoreToken(storage.HashToken(newAccessToken), storage.TokenAccess, token.ClientID, accessExpiry, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store token")
 		return
 	}
-	if err := s.db.StoreToken(storage.HashToken(newRefreshToken), storage.TokenRefresh, token.ClientID, refreshExpiry); err != nil {
+	if err := s.db.StoreToken(storage.HashToken(newRefreshToken), storage.TokenRefresh, token.ClientID, refreshExpiry, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store token")
 		return
 	}
