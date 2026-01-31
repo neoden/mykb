@@ -7,20 +7,31 @@ A self-hosted text chunk storage and search service exposed via MCP (Model Conte
 ## Architecture
 
 ```
-Internet → Caddy (:443) → FastAPI (:8000) → SQLite + Redis
-                              ↓
-                         FastMCP (/mcp)
+Internet → mykb (:443) → SQLite
+              ↓
+         MCP (/mcp)
 ```
 
-- **FastAPI** - Main app, handles OAuth and REST API
-- **FastMCP** - MCP server mounted at `/mcp` with Bearer token auth
-- **SQLite + FTS5** - Persistent storage with full-text search
-- **Redis** - Ephemeral OAuth tokens and auth codes (TTL-based)
-- **Caddy** - Reverse proxy with auto HTTPS
+Single Go binary with:
+- **Built-in HTTPS** with Let's Encrypt (autocert)
+- **SQLite + FTS5** for everything: chunks, OAuth tokens, clients, settings
+- **MCP server** at `/mcp` with Bearer token auth
+- **OAuth 2.0** with dynamic client registration + PKCE
+
+## CLI
+
+```
+mykb serve stdio                  # MCP over stdio (local)
+mykb serve http --listen :8080    # HTTP on localhost (dev)
+mykb serve http --domain DOMAIN   # HTTPS with auto TLS (prod)
+mykb set-password                 # Set auth password
+```
+
+Options:
+- `--data DIR` - Data directory (default: `~/.local/share/mykb`, env: `MYKB_DATA`)
+- `--behind-proxy` - Trust X-Forwarded-For header (env: `MYKB_BEHIND_PROXY=1`)
 
 ## Deployment
-
-Configuration is in `.env` (see `.env.example`). MCP URL is `${BASE_URL}/mcp`.
 
 ### Deploy changes
 
@@ -28,40 +39,46 @@ Configuration is in `.env` (see `.env.example`). MCP URL is `${BASE_URL}/mcp`.
 ./deploy.sh
 ```
 
-### Manual operations
+Requires `DEPLOY_HOST` in `.env` (e.g., `root@server`).
 
-Read `DEPLOY_HOST` from `.env` for SSH commands:
+### Manual operations
 
 ```bash
 # View logs
-ssh $DEPLOY_HOST "cd /opt/mykb && docker compose logs -f app"
+ssh $DEPLOY_HOST "journalctl -u mykb -f"
 
-# Restart all services
-ssh $DEPLOY_HOST "cd /opt/mykb && docker compose restart"
+# Restart
+ssh $DEPLOY_HOST "systemctl restart mykb"
 
-# Check status
-ssh $DEPLOY_HOST "cd /opt/mykb && docker compose ps"
+# Status
+ssh $DEPLOY_HOST "systemctl status mykb"
+
+# Set password (first time)
+ssh $DEPLOY_HOST "mykb --data /var/lib/mykb set-password"
 ```
 
-### Configuration
+### Server configuration
 
-Local `.env` file contains:
-- `AUTH_PASSWORD` - Password for OAuth authorization screen
-- `BASE_URL` - Public URL of the service
-- `DEPLOY_HOST` - SSH target for deployment (user@host)
+On the server, create `/etc/mykb.env`:
+```
+MYKB_DOMAIN=mykb.example.com
+```
 
-Copy `Caddyfile.example` to `Caddyfile` and set your domain.
+Data stored in `/var/lib/mykb/` (database, TLS certs).
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `app/main.py` | FastAPI app, mounts MCP server with lifespan |
-| `app/mcp/server.py` | FastMCP server with tools (store, search, get, list, delete) |
-| `app/oauth/routes.py` | OAuth endpoints (register, authorize, token) |
-| `app/oauth/tokens.py` | Redis token storage + `RedisTokenVerifier` for MCP auth |
-| `app/chunks.py` | CRUD operations for chunks (SQLite) |
-| `app/database.py` | SQLite schema with FTS5 |
+| `main.go` | CLI entry point |
+| `mcp/server.go` | MCP protocol handler (stdio + streamable HTTP) |
+| `mcp/tools.go` | MCP tool definitions and handlers |
+| `httpd/server.go` | HTTP server with autocert |
+| `httpd/oauth.go` | OAuth endpoints (register, authorize, token) |
+| `httpd/mcp.go` | MCP-over-HTTP transport |
+| `storage/db.go` | SQLite schema and migrations |
+| `storage/chunks.go` | Chunk CRUD + FTS5 search |
+| `storage/tokens.go` | OAuth token storage |
 
 ## OAuth Flow
 
@@ -84,27 +101,10 @@ Uses dynamic client registration (RFC 7591) + Authorization Code + PKCE:
 - `get_metadata_index(top_n?)` - Overview of metadata keys and values
 - `get_metadata_values(key, top_n?)` - Drill down into specific metadata key
 
-## REST API
-
-Protected by Bearer token (same as MCP):
-
-- `POST /api/chunks` - Create
-- `GET /api/chunks` - List
-- `GET /api/chunks/{id}` - Get
-- `PUT /api/chunks/{id}` - Update
-- `DELETE /api/chunks/{id}` - Delete
-- `GET /api/search?q=...` - Search
-
 ## Testing
 
 ```bash
-uv run pytest
+go test ./...
 ```
 
-Tests use in-memory SQLite and fakeredis. Fixtures in `tests/conftest.py` patch `get_db()` and `get_redis()`.
-
-| File | Coverage |
-|------|----------|
-| `tests/test_api.py` | REST API endpoints |
-| `tests/test_mcp.py` | MCP tools via FastMCP Client |
-| `tests/test_oauth.py` | OAuth flow + token utilities |
+Tests use in-memory SQLite.

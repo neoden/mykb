@@ -7,19 +7,33 @@ if [ -f .env ]; then
 fi
 
 HOST="${DEPLOY_HOST:?DEPLOY_HOST not set. Add it to .env or export it.}"
-REMOTE_DIR="/opt/mykb"
 
-echo "Syncing files..."
-rsync -av --exclude='.venv' --exclude='__pycache__' --exclude='*.db' --exclude='.git' --exclude='.env' \
-    ./ ${HOST}:${REMOTE_DIR}/
+echo "Building..."
+GOOS=linux GOARCH=amd64 go build -o mykb.bin .
 
-echo "Ensuring data directory exists..."
-ssh ${HOST} "mkdir -p ${REMOTE_DIR}/data"
+echo "Copying binary..."
+scp mykb.bin ${HOST}:/usr/local/bin/mykb
+rm mykb.bin
 
-echo "Rebuilding and restarting app..."
-ssh ${HOST} "cd ${REMOTE_DIR} && docker compose up -d --build app"
+echo "Copying systemd unit..."
+scp mykb.service ${HOST}:/etc/systemd/system/mykb.service
 
-echo "Checking logs..."
-ssh ${HOST} "cd ${REMOTE_DIR} && docker compose logs --tail=10 app"
+echo "Setting up on remote..."
+ssh ${HOST} << 'EOF'
+    # Create user if not exists
+    id mykb &>/dev/null || useradd -r -s /sbin/nologin mykb
+
+    # Create data directory
+    mkdir -p /var/lib/mykb
+    chown mykb:mykb /var/lib/mykb
+
+    # Reload and restart
+    systemctl daemon-reload
+    systemctl enable mykb
+    systemctl restart mykb
+EOF
+
+echo "Status:"
+ssh ${HOST} "systemctl status mykb --no-pager"
 
 echo "Done!"
