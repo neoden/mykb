@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -173,8 +172,10 @@ func (db *DB) SearchChunks(query string, limit int) ([]SearchResult, error) {
 		limit = 100
 	}
 
-	// Escape tokens for FTS5
-	escaped := escapeFTS5Query(query)
+	// Wildcard: return recent chunks
+	if query == "*" {
+		return db.listChunks(limit)
+	}
 
 	rows, err := db.conn.Query(`
 		SELECT c.id,
@@ -189,7 +190,7 @@ func (db *DB) SearchChunks(query string, limit int) ([]SearchResult, error) {
 		WHERE chunks_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?
-	`, escaped, limit)
+	`, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search chunks: %w", err)
 	}
@@ -214,16 +215,6 @@ func (db *DB) SearchChunks(query string, limit int) ([]SearchResult, error) {
 	return results, rows.Err()
 }
 
-// escapeFTS5Query escapes a query for FTS5 by quoting each token.
-func escapeFTS5Query(query string) string {
-	tokens := strings.Fields(query)
-	escaped := make([]string, len(tokens))
-	for i, t := range tokens {
-		// Escape internal quotes and wrap in quotes
-		escaped[i] = `"` + strings.ReplaceAll(t, `"`, `""`) + `"`
-	}
-	return strings.Join(escaped, " ")
-}
 
 // GetMetadataIndex returns aggregated metadata keys with top values.
 func (db *DB) GetMetadataIndex(topN int) (map[string]interface{}, error) {
@@ -325,4 +316,38 @@ func (db *DB) GetMetadataValues(key string, topN int) (map[string]interface{}, e
 		"key":    key,
 		"values": values,
 	}, rows.Err()
+}
+
+// listChunks returns recent chunks (for wildcard query).
+func (db *DB) listChunks(limit int) ([]SearchResult, error) {
+	rows, err := db.conn.Query(`
+		SELECT id,
+		       CASE WHEN length(content) > 80
+		            THEN substr(content, 1, 80) || '...'
+		            ELSE content
+		       END,
+		       metadata
+		FROM chunks
+		ORDER BY updated_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list chunks: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		var metaStr sql.NullString
+		if err := rows.Scan(&r.ID, &r.Content, &metaStr); err != nil {
+			return nil, fmt.Errorf("scan result: %w", err)
+		}
+		if metaStr.Valid {
+			r.Metadata = json.RawMessage(metaStr.String)
+		}
+		r.Snippet = r.Content
+		results = append(results, r)
+	}
+	return results, rows.Err()
 }

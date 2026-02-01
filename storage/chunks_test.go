@@ -318,6 +318,90 @@ func TestGetMetadataIndex(t *testing.T) {
 	}
 }
 
+func TestSearchChunksWildcard(t *testing.T) {
+	db := setupTestDB(t)
+
+	db.CreateChunk("First document", nil)
+	db.CreateChunk("Second document", nil)
+	db.CreateChunk("Third document", nil)
+
+	results, err := db.SearchChunks("*", 10)
+	if err != nil {
+		t.Fatalf("SearchChunks: %v", err)
+	}
+
+	if len(results) != 3 {
+		t.Errorf("len(results) = %d, want 3", len(results))
+	}
+}
+
+func TestSearchChunksWildcardLimit(t *testing.T) {
+	db := setupTestDB(t)
+
+	for i := 0; i < 5; i++ {
+		db.CreateChunk("Document", nil)
+	}
+
+	results, err := db.SearchChunks("*", 2)
+	if err != nil {
+		t.Fatalf("SearchChunks: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("len(results) = %d, want 2", len(results))
+	}
+}
+
+func TestSearchChunksPrefixWildcard(t *testing.T) {
+	db := setupTestDB(t)
+
+	db.CreateChunk("testing the code", nil)
+	db.CreateChunk("tested yesterday", nil)
+	db.CreateChunk("something else", nil)
+
+	results, err := db.SearchChunks("test*", 10)
+	if err != nil {
+		t.Fatalf("SearchChunks: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("len(results) = %d, want 2", len(results))
+	}
+}
+
+func TestSearchChunksOR(t *testing.T) {
+	db := setupTestDB(t)
+
+	db.CreateChunk("I have a cat", nil)
+	db.CreateChunk("I have a dog", nil)
+	db.CreateChunk("I have a fish", nil)
+
+	results, err := db.SearchChunks("cat OR dog", 10)
+	if err != nil {
+		t.Fatalf("SearchChunks: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("len(results) = %d, want 2", len(results))
+	}
+}
+
+func TestSearchChunksPhrase(t *testing.T) {
+	db := setupTestDB(t)
+
+	db.CreateChunk("the quick brown fox", nil)
+	db.CreateChunk("quick thinking brown ideas", nil)
+
+	results, err := db.SearchChunks(`"quick brown"`, 10)
+	if err != nil {
+		t.Fatalf("SearchChunks: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Errorf("len(results) = %d, want 1", len(results))
+	}
+}
+
 func TestGetMetadataValues(t *testing.T) {
 	db := setupTestDB(t)
 
