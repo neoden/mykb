@@ -1,5 +1,8 @@
 # MyKB
 
+[![CI](https://github.com/neoden/mykb/actions/workflows/ci.yml/badge.svg)](https://github.com/neoden/mykb/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/neoden/mykb/graph/badge.svg)](https://codecov.io/gh/neoden/mykb)
+
 Personal knowledge base with full-text and semantic search, exposed via [MCP](https://modelcontextprotocol.io/) (Model Context Protocol).
 
 Store text chunks with metadata, search them with FTS5 or vector similarity, and let Claude (or any MCP client) access your knowledge.
