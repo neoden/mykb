@@ -137,10 +137,10 @@ type CallToolResult struct {
 
 // Content is a content block in tool results.
 type Content struct {
-	Type     string            `json:"type"`
-	Text     string            `json:"text,omitempty"`
-	Data     string            `json:"data,omitempty"`     // base64 for image/audio
-	MimeType string            `json:"mimeType,omitempty"` // for image/audio
+	Type        string              `json:"type"`
+	Text        string              `json:"text,omitempty"`
+	Data        string              `json:"data,omitempty"`     // base64 for image/audio
+	MimeType    string              `json:"mimeType,omitempty"` // for image/audio
 	Annotations *ContentAnnotations `json:"annotations,omitempty"`
 }
 

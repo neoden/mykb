@@ -16,13 +16,13 @@ import (
 )
 
 type oauthMetadata struct {
-	Issuer                           string   `json:"issuer"`
-	AuthorizationEndpoint            string   `json:"authorization_endpoint"`
-	TokenEndpoint                    string   `json:"token_endpoint"`
-	RegistrationEndpoint             string   `json:"registration_endpoint"`
-	ResponseTypesSupported           []string `json:"response_types_supported"`
-	GrantTypesSupported              []string `json:"grant_types_supported"`
-	CodeChallengeMethodsSupported    []string `json:"code_challenge_methods_supported"`
+	Issuer                        string   `json:"issuer"`
+	AuthorizationEndpoint         string   `json:"authorization_endpoint"`
+	TokenEndpoint                 string   `json:"token_endpoint"`
+	RegistrationEndpoint          string   `json:"registration_endpoint"`
+	ResponseTypesSupported        []string `json:"response_types_supported"`
+	GrantTypesSupported           []string `json:"grant_types_supported"`
+	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
 }
 
 type protectedResourceMetadata struct {

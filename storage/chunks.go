@@ -215,7 +215,6 @@ func (db *DB) SearchChunks(query string, limit int) ([]SearchResult, error) {
 	return results, rows.Err()
 }
 
-
 // GetMetadataIndex returns aggregated metadata keys with top values.
 func (db *DB) GetMetadataIndex(topN int) (map[string]interface{}, error) {
 	if topN <= 0 {

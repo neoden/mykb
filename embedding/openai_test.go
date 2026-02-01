@@ -202,7 +202,6 @@ func TestOpenAIClientHasTimeout(t *testing.T) {
 	}
 }
 
-
 // urlRewriteTransport rewrites request URLs to point to test server
 type urlRewriteTransport struct {
 	base http.RoundTripper
