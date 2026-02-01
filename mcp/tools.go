@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/neoden/mykb/storage"
@@ -290,11 +291,11 @@ func (s *Server) toolGetChunk(_ context.Context, args json.RawMessage) (any, err
 	}
 
 	chunk, err := s.db.GetChunk(params.ChunkID)
+	if errors.Is(err, storage.ErrChunkNotFound) {
+		return map[string]any{"found": false}, nil
+	}
 	if err != nil {
 		return nil, err
-	}
-	if chunk == nil {
-		return map[string]any{"found": false}, nil
 	}
 	return chunk, nil
 }
@@ -315,11 +316,11 @@ func (s *Server) toolUpdateChunk(ctx context.Context, args json.RawMessage) (any
 	// If no content change or no embedder, update without transaction
 	if params.Content == nil || s.embedder == nil {
 		chunk, err := s.db.UpdateChunk(params.ChunkID, params.Content, params.Metadata)
+		if errors.Is(err, storage.ErrChunkNotFound) {
+			return map[string]any{"found": false}, nil
+		}
 		if err != nil {
 			return nil, err
-		}
-		if chunk == nil {
-			return map[string]any{"found": false}, nil
 		}
 		return chunk, nil
 	}
@@ -332,11 +333,11 @@ func (s *Server) toolUpdateChunk(ctx context.Context, args json.RawMessage) (any
 	defer tx.Rollback()
 
 	chunk, err := tx.UpdateChunk(params.ChunkID, params.Content, params.Metadata)
+	if errors.Is(err, storage.ErrChunkNotFound) {
+		return map[string]any{"found": false}, nil
+	}
 	if err != nil {
 		return nil, err
-	}
-	if chunk == nil {
-		return map[string]any{"found": false}, nil
 	}
 
 	// Re-generate embedding for new content
@@ -460,8 +461,8 @@ func (s *Server) toolSemanticSearch(ctx context.Context, args json.RawMessage) (
 	output := make([]resultWithChunk, 0, len(results))
 	for _, r := range results {
 		chunk, err := s.db.GetChunk(r.ID)
-		if err != nil || chunk == nil {
-			continue
+		if err != nil {
+			continue // skip chunks that were deleted or have errors
 		}
 		content := chunk.Content
 		if len(content) > 200 {

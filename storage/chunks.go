@@ -3,11 +3,15 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrChunkNotFound is returned when a chunk with the specified ID does not exist.
+var ErrChunkNotFound = errors.New("chunk not found")
 
 // Chunk represents a stored text chunk.
 type Chunk struct {
@@ -73,7 +77,7 @@ func getChunk(exec sqlExecutor, id string) (*Chunk, error) {
 	`, id).Scan(&chunk.ID, &chunk.Content, &metaStr, &chunk.CreatedAt, &chunk.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return nil, ErrChunkNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get chunk: %w", err)
@@ -120,10 +124,7 @@ func (db *DB) UpdateChunk(id string, content *string, metadata json.RawMessage) 
 func updateChunk(exec sqlExecutor, id string, content *string, metadata json.RawMessage) (*Chunk, error) {
 	existing, err := getChunk(exec, id)
 	if err != nil {
-		return nil, err
-	}
-	if existing == nil {
-		return nil, nil
+		return nil, err // ErrChunkNotFound propagates here
 	}
 
 	now := time.Now().UTC()

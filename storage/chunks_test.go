@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -113,11 +114,11 @@ func TestGetChunkNotFound(t *testing.T) {
 	db := setupTestDB(t)
 
 	got, err := db.GetChunk("nonexistent-id")
-	if err != nil {
-		t.Fatalf("GetChunk: %v", err)
+	if !errors.Is(err, ErrChunkNotFound) {
+		t.Errorf("GetChunk error = %v, want ErrChunkNotFound", err)
 	}
 	if got != nil {
-		t.Error("Expected nil for nonexistent chunk")
+		t.Error("Expected nil chunk for nonexistent ID")
 	}
 }
 
@@ -167,11 +168,11 @@ func TestUpdateChunkNotFound(t *testing.T) {
 
 	content := "test"
 	updated, err := db.UpdateChunk("nonexistent", &content, nil)
-	if err != nil {
-		t.Fatalf("UpdateChunk: %v", err)
+	if !errors.Is(err, ErrChunkNotFound) {
+		t.Errorf("UpdateChunk error = %v, want ErrChunkNotFound", err)
 	}
 	if updated != nil {
-		t.Error("Expected nil for nonexistent chunk")
+		t.Error("Expected nil chunk for nonexistent ID")
 	}
 }
 
@@ -189,9 +190,9 @@ func TestDeleteChunk(t *testing.T) {
 	}
 
 	// Verify it's gone
-	got, _ := db.GetChunk(created.ID)
-	if got != nil {
-		t.Error("Chunk should be deleted")
+	_, err = db.GetChunk(created.ID)
+	if !errors.Is(err, ErrChunkNotFound) {
+		t.Errorf("GetChunk after delete: error = %v, want ErrChunkNotFound", err)
 	}
 }
 
@@ -481,7 +482,7 @@ func TestDatabasePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChunk: %v", err)
 	}
-	if got == nil || got.Content != "Persistent data" {
+	if got.Content != "Persistent data" {
 		t.Error("Data should persist across reopens")
 	}
 }

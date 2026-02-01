@@ -119,8 +119,10 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Cleanup stale clients
-	s.db.DeleteStaleClients()
+	// Cleanup stale clients (best-effort, log errors)
+	if err := s.db.DeleteStaleClients(); err != nil {
+		log.Printf("warning: failed to cleanup stale clients: %v", err)
+	}
 
 	clientID := uuid.New().String()
 	if err := s.db.CreateClient(clientID, req.ClientName, req.RedirectURIs); err != nil {
