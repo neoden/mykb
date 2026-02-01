@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/neoden/mykb/httpd"
@@ -14,8 +15,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 )
-
-var version = "dev"
 
 var dataDir string
 
@@ -42,7 +41,7 @@ func main() {
 		}
 		switch args[1] {
 		case "stdio":
-			serveStdio(args[2:])
+			serveStdio()
 		case "http":
 			serveHTTP(args[2:])
 		default:
@@ -68,7 +67,8 @@ Usage:
   mykb set-password                 Set password for auth
 
 Options:
-  --data DIR       Data directory (default: ~/.local/share/mykb, env: MYKB_DATA)
+  --data DIR       Data directory (default: ~/.local/share/mykb on Linux/macOS,
+                   %%LOCALAPPDATA%%\mykb on Windows; env: MYKB_DATA)
 
 HTTP transport options (mutually exclusive):
   --listen PORT    HTTP on localhost only (env: MYKB_LISTEN)
@@ -76,7 +76,7 @@ HTTP transport options (mutually exclusive):
   --behind-proxy   Trust X-Forwarded-For header (env: MYKB_BEHIND_PROXY=1)`)
 }
 
-func serveStdio(args []string) {
+func serveStdio() {
 	db := openDB(dataDir)
 	defer db.Close()
 
@@ -130,13 +130,6 @@ func serveHTTP(args []string) {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }
 
 func setPassword() {
@@ -209,6 +202,9 @@ func openDB(dataDir string) *storage.DB {
 func defaultDataDir() string {
 	if dir := os.Getenv("MYKB_DATA"); dir != "" {
 		return dir
+	}
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "mykb")
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "share", "mykb")
