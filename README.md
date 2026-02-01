@@ -145,6 +145,33 @@ mykb set-password         # Set auth password
 mykb reindex [--force]    # Generate embeddings for existing chunks
 ```
 
+## Running as a Service
+
+Systemd unit file is included (`mykb.service`):
+
+```bash
+# Create user and directories
+sudo useradd -r -s /bin/false mykb
+sudo mkdir -p /var/lib/mykb /etc/mykb
+sudo chown mykb:mykb /var/lib/mykb
+
+# Install binary and config
+sudo cp mykb /usr/local/bin/
+sudo cp config.toml /etc/mykb/
+
+# Set password
+sudo -u mykb mykb --config /etc/mykb/config.toml set-password
+
+# Install and start service
+sudo cp mykb.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mykb
+
+# Check status
+sudo systemctl status mykb
+sudo journalctl -u mykb -f
+```
+
 ## Development
 
 ```bash
