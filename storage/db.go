@@ -32,6 +32,12 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
+	// Enable foreign keys
+	if _, err := conn.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+
 	return &DB{conn: conn}, nil
 }
 
@@ -158,5 +164,14 @@ var migrations = []migration{
 	{
 		"004_tokens_data",
 		`ALTER TABLE tokens ADD COLUMN data TEXT;`,
+	},
+	{
+		"005_embeddings",
+		`CREATE TABLE embeddings (
+			chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+			model TEXT NOT NULL,
+			embedding BLOB NOT NULL,
+			created_at INTEGER DEFAULT (unixepoch())
+		);`,
 	},
 }

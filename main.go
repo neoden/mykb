@@ -1,31 +1,44 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"syscall"
 
+	"github.com/neoden/mykb/config"
+	"github.com/neoden/mykb/embedding"
 	"github.com/neoden/mykb/httpd"
 	"github.com/neoden/mykb/mcp"
 	"github.com/neoden/mykb/storage"
+	"github.com/neoden/mykb/vector"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 )
 
-var dataDir string
+var (
+	configPath string
+	cfg        *config.Config
+)
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
 	log.SetOutput(os.Stderr)
 
 	// Global flags
-	flag.StringVar(&dataDir, "data", defaultDataDir(), "Data directory")
+	flag.StringVar(&configPath, "config", config.DefaultPath(), "Config file path")
 	flag.Usage = usage
 	flag.Parse()
+
+	// Load config
+	var err error
+	cfg, err = config.Load(configPath)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
 
 	args := flag.Args()
 	if len(args) == 0 {
@@ -43,13 +56,18 @@ func main() {
 		case "stdio":
 			serveStdio()
 		case "http":
-			serveHTTP(args[2:])
+			serveHTTP()
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown serve mode: %s\n", args[1])
 			os.Exit(1)
 		}
 	case "set-password":
 		setPassword()
+	case "reindex":
+		fs := flag.NewFlagSet("reindex", flag.ExitOnError)
+		force := fs.Bool("force", false, "Re-index all chunks, replacing existing embeddings")
+		fs.Parse(args[1:])
+		reindex(*force)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", args[0])
 		usage()
@@ -58,51 +76,46 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `mykb - Personal knowledge base with full-text search
+	fmt.Fprintf(os.Stderr, `mykb - Personal knowledge base with full-text search
 
 Usage:
-  mykb serve stdio                  Run MCP server over stdio
-  mykb serve http [--listen PORT]    Run HTTP on localhost (dev, default :8080)
-  mykb serve http --domain DOMAIN   Run HTTPS with auto TLS (production)
-  mykb set-password                 Set password for auth
+  mykb serve stdio      Run MCP server over stdio
+  mykb serve http       Run HTTP server
+  mykb set-password     Set password for auth
+  mykb reindex [--force]   Generate embeddings for chunks without them
 
 Options:
-  --data DIR       Data directory (default: ~/.local/share/mykb on Linux/macOS,
-                   %%LOCALAPPDATA%%\mykb on Windows; env: MYKB_DATA)
-
-HTTP transport options (mutually exclusive):
-  --listen PORT    HTTP on localhost only (env: MYKB_LISTEN)
-  --domain DOMAIN  HTTPS with Let's Encrypt (env: MYKB_DOMAIN)
-  --behind-proxy   Trust X-Forwarded-For header (env: MYKB_BEHIND_PROXY=1)`)
+  --config PATH    Config file (default: %s)
+`, config.DefaultPath())
 }
 
 func serveStdio() {
-	db := openDB(dataDir)
+	db := openDB(cfg.DataDir)
 	defer db.Close()
 
-	server := mcp.NewServer(db)
+	embedder := initEmbedder()
+	index := initVectorIndex(db, embedderModel(embedder))
+
+	server := mcp.NewServer(db, embedder, index)
 	if err := server.ServeStdio(); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func serveHTTP(args []string) {
-	fs := flag.NewFlagSet("serve http", flag.ExitOnError)
-	listen := fs.String("listen", os.Getenv("MYKB_LISTEN"), "Listen address for HTTP (localhost only, dev mode)")
-	domain := fs.String("domain", os.Getenv("MYKB_DOMAIN"), "Domain for HTTPS with auto TLS (production)")
-	behindProxy := fs.Bool("behind-proxy", os.Getenv("MYKB_BEHIND_PROXY") == "1", "Trust X-Forwarded-For for client IP")
-	fs.Parse(args)
+func serveHTTP() {
+	listen := cfg.Server.Listen
+	domain := cfg.Server.Domain
 
-	if *listen != "" && *domain != "" {
-		fmt.Fprintln(os.Stderr, "Error: --listen and --domain are mutually exclusive")
+	if listen != "" && domain != "" {
+		fmt.Fprintln(os.Stderr, "Error: listen and domain are mutually exclusive in config")
 		os.Exit(1)
 	}
-	if *listen == "" && *domain == "" {
-		*listen = ":8080"
+	if listen == "" && domain == "" {
+		listen = ":8080"
 	}
 
-	db := openDB(dataDir)
+	db := openDB(cfg.DataDir)
 	defer db.Close()
 
 	// Check password is set
@@ -111,21 +124,25 @@ func serveHTTP(args []string) {
 		os.Exit(1)
 	}
 
-	config := httpd.DefaultConfig()
-	config.Domain = *domain
-	config.CertCache = filepath.Join(dataDir, "certs")
-	config.BehindProxy = *behindProxy
+	embedder := initEmbedder()
+	index := initVectorIndex(db, embedderModel(embedder))
+	mcpServer := mcp.NewServer(db, embedder, index)
 
-	if *domain != "" {
-		config.BaseURL = "https://" + *domain
-		log.Printf("Starting HTTPS server for %s", *domain)
+	httpConfig := httpd.DefaultConfig()
+	httpConfig.Domain = domain
+	httpConfig.CertCache = filepath.Join(cfg.DataDir, "certs")
+	httpConfig.BehindProxy = cfg.Server.BehindProxy
+
+	if domain != "" {
+		httpConfig.BaseURL = "https://" + domain
+		log.Printf("Starting HTTPS server for %s", domain)
 	} else {
 		// HTTP mode: force localhost only (no TLS = no public exposure)
-		config.Listen, config.BaseURL = httpd.LocalhostAddr(*listen)
-		log.Printf("Starting HTTP server on %s (dev mode)", config.Listen)
+		httpConfig.Listen, httpConfig.BaseURL = httpd.LocalhostAddr(listen)
+		log.Printf("Starting HTTP server on %s (dev mode)", httpConfig.Listen)
 	}
 
-	server := httpd.NewServer(db, config)
+	server := httpd.NewServer(db, mcpServer, httpConfig)
 	if err := server.ListenAndServe(); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
@@ -133,7 +150,7 @@ func serveHTTP(args []string) {
 }
 
 func setPassword() {
-	db := openDB(dataDir)
+	db := openDB(cfg.DataDir)
 	defer db.Close()
 
 	// Read password
@@ -199,13 +216,105 @@ func openDB(dataDir string) *storage.DB {
 	return db
 }
 
-func defaultDataDir() string {
-	if dir := os.Getenv("MYKB_DATA"); dir != "" {
-		return dir
+func reindex(force bool) {
+	db := openDB(cfg.DataDir)
+	defer db.Close()
+
+	embedder := initEmbedder()
+	if embedder == nil {
+		log.Fatalf("Embedding provider not configured")
 	}
-	if runtime.GOOS == "windows" {
-		return filepath.Join(os.Getenv("LOCALAPPDATA"), "mykb")
+
+	var chunks []storage.Chunk
+	var err error
+
+	if force {
+		chunks, err = db.GetAllChunks()
+		if err != nil {
+			log.Fatalf("Failed to get chunks: %v", err)
+		}
+		if len(chunks) == 0 {
+			log.Println("No chunks to index")
+			return
+		}
+		log.Printf("Re-indexing all %d chunks with %s", len(chunks), embedder.Model())
+	} else {
+		chunks, err = db.GetChunksWithoutEmbeddings(embedder.Model())
+		if err != nil {
+			log.Fatalf("Failed to get chunks: %v", err)
+		}
+		if len(chunks) == 0 {
+			log.Println("All chunks already have embeddings for this model")
+			return
+		}
+		log.Printf("Indexing %d chunks with %s", len(chunks), embedder.Model())
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "mykb")
+
+	const batchSize = 100
+
+	for i := 0; i < len(chunks); i += batchSize {
+		end := min(i+batchSize, len(chunks))
+		batch := chunks[i:end]
+
+		// Collect texts for batch embedding
+		texts := make([]string, len(batch))
+		for j, chunk := range batch {
+			texts[j] = chunk.Content
+		}
+
+		vecs, err := embedder.Embed(context.Background(), texts)
+		if err != nil {
+			log.Printf("Error embedding batch %d-%d: %v", i+1, end, err)
+			continue
+		}
+
+		// Save embeddings
+		saved := 0
+		for j, chunk := range batch {
+			if j >= len(vecs) || vecs[j] == nil {
+				log.Printf("No embedding returned for chunk %s", chunk.ID)
+				continue
+			}
+			if err := db.SaveEmbedding(chunk.ID, embedder.Model(), vecs[j]); err != nil {
+				log.Printf("Error saving embedding for chunk %s: %v", chunk.ID, err)
+				continue
+			}
+			saved++
+		}
+		log.Printf("[%d-%d/%d] Indexed %d chunks", i+1, end, len(chunks), saved)
+	}
+
+	log.Println("Done")
+}
+
+func embedderModel(e embedding.EmbeddingProvider) string {
+	if e == nil {
+		return ""
+	}
+	return e.Model()
+}
+
+func initEmbedder() embedding.EmbeddingProvider {
+	emb, err := embedding.New(cfg.Embedding)
+	if err != nil {
+		log.Printf("Embedding provider not configured: %v", err)
+		return nil
+	}
+	log.Printf("Embedding provider: %s", emb.Model())
+	return emb
+}
+
+func initVectorIndex(db *storage.DB, model string) *vector.Index {
+	idx := vector.NewIndex()
+	if model == "" {
+		return idx
+	}
+	vecs, err := db.LoadEmbeddingsByModel(model)
+	if err != nil {
+		log.Printf("Failed to load embeddings: %v", err)
+		return idx
+	}
+	idx.Load(vecs)
+	log.Printf("Loaded %d embeddings for model %s", len(vecs), model)
+	return idx
 }

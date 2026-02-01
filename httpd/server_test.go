@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neoden/mykb/mcp"
 	"github.com/neoden/mykb/storage"
+	"github.com/neoden/mykb/vector"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -33,7 +35,8 @@ func setupTestServer(t *testing.T) (*Server, *storage.DB) {
 	config := DefaultConfig()
 	config.BaseURL = "http://localhost:8080"
 
-	return NewServer(db, config), db
+	mcpServer := mcp.NewServer(db, nil, vector.NewIndex())
+	return NewServer(db, mcpServer, config), db
 }
 
 func setupTestServerNoPassword(t *testing.T) (*Server, *storage.DB) {
@@ -53,7 +56,8 @@ func setupTestServerNoPassword(t *testing.T) (*Server, *storage.DB) {
 	config := DefaultConfig()
 	config.BaseURL = "http://localhost:8080"
 
-	return NewServer(db, config), db
+	mcpServer := mcp.NewServer(db, nil, vector.NewIndex())
+	return NewServer(db, mcpServer, config), db
 }
 
 func TestHealthEndpoint(t *testing.T) {

@@ -40,8 +40,8 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle request
-	resp := s.mcp.HandleRequest(&req)
+	// Handle request (pass HTTP context for cancellation)
+	resp := s.mcp.HandleRequest(r.Context(), &req)
 	if resp == nil {
 		// Notification - no response expected
 		w.WriteHeader(http.StatusNoContent)

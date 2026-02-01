@@ -47,10 +47,10 @@ type Server struct {
 }
 
 // NewServer creates a new HTTP server.
-func NewServer(db *storage.DB, config *Config) *Server {
+func NewServer(db *storage.DB, mcpServer *mcp.Server, config *Config) *Server {
 	s := &Server{
 		db:          db,
-		mcp:         mcp.NewServer(db),
+		mcp:         mcpServer,
 		config:      config,
 		rateLimiter: NewIPRateLimiter(0.1, 3, config.BehindProxy), // 1 req/10sec, burst 3
 		mux:         http.NewServeMux(),

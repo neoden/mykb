@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/neoden/mykb/storage"
 )
@@ -158,6 +160,29 @@ var toolDefinitions = []Tool{
 			ReadOnlyHint: true,
 		},
 	},
+	{
+		Name:        "semantic_search",
+		Title:       "Semantic Search",
+		Description: "Search chunks by semantic similarity using vector embeddings. Returns chunks most similar in meaning to the query.",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"query": {
+					Type:        "string",
+					Description: "The search query",
+				},
+				"limit": {
+					Type:        "integer",
+					Description: "Maximum results to return",
+					Default:     10,
+				},
+			},
+			Required: []string{"query"},
+		},
+		Annotations: &ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+	},
 }
 
 // registerTools registers all tool handlers.
@@ -169,11 +194,12 @@ func (s *Server) registerTools() {
 	s.tools["delete_chunk"] = s.toolDeleteChunk
 	s.tools["get_metadata_index"] = s.toolGetMetadataIndex
 	s.tools["get_metadata_values"] = s.toolGetMetadataValues
+	s.tools["semantic_search"] = s.toolSemanticSearch
 }
 
 // Tool handlers
 
-func (s *Server) toolStoreChunk(args json.RawMessage) (interface{}, error) {
+func (s *Server) toolStoreChunk(ctx context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		Content  string          `json:"content"`
 		Metadata json.RawMessage `json:"metadata"`
@@ -189,10 +215,25 @@ func (s *Server) toolStoreChunk(args json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Generate and store embedding if provider is configured
+	if s.embedder != nil {
+		vecs, err := s.embedder.Embed(ctx, []string{params.Content})
+		if err != nil {
+			log.Printf("Failed to generate embedding for chunk %s: %v", chunk.ID, err)
+		} else if len(vecs) > 0 {
+			if err := s.db.SaveEmbedding(chunk.ID, s.embedder.Model(), vecs[0]); err != nil {
+				log.Printf("Failed to save embedding for chunk %s: %v", chunk.ID, err)
+			} else {
+				s.index.Add(chunk.ID, vecs[0])
+			}
+		}
+	}
+
 	return chunk, nil
 }
 
-func (s *Server) toolSearchChunks(args json.RawMessage) (interface{}, error) {
+func (s *Server) toolSearchChunks(_ context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		Query string `json:"query"`
 		Limit int    `json:"limit"`
@@ -219,7 +260,7 @@ func (s *Server) toolSearchChunks(args json.RawMessage) (interface{}, error) {
 	}, nil
 }
 
-func (s *Server) toolGetChunk(args json.RawMessage) (interface{}, error) {
+func (s *Server) toolGetChunk(_ context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		ChunkID string `json:"chunk_id"`
 	}
@@ -234,10 +275,13 @@ func (s *Server) toolGetChunk(args json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return chunk, nil // nil if not found
+	if chunk == nil {
+		return map[string]interface{}{"found": false}, nil
+	}
+	return chunk, nil
 }
 
-func (s *Server) toolUpdateChunk(args json.RawMessage) (interface{}, error) {
+func (s *Server) toolUpdateChunk(ctx context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		ChunkID  string          `json:"chunk_id"`
 		Content  *string         `json:"content"`
@@ -254,10 +298,28 @@ func (s *Server) toolUpdateChunk(args json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return chunk, nil // nil if not found
+	if chunk == nil {
+		return map[string]interface{}{"found": false}, nil
+	}
+
+	// Re-generate embedding if content changed
+	if params.Content != nil && s.embedder != nil {
+		vecs, err := s.embedder.Embed(ctx, []string{*params.Content})
+		if err != nil {
+			log.Printf("Failed to generate embedding for chunk %s: %v", chunk.ID, err)
+		} else if len(vecs) > 0 {
+			if err := s.db.SaveEmbedding(chunk.ID, s.embedder.Model(), vecs[0]); err != nil {
+				log.Printf("Failed to save embedding for chunk %s: %v", chunk.ID, err)
+			} else {
+				s.index.Add(chunk.ID, vecs[0])
+			}
+		}
+	}
+
+	return chunk, nil
 }
 
-func (s *Server) toolDeleteChunk(args json.RawMessage) (interface{}, error) {
+func (s *Server) toolDeleteChunk(_ context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		ChunkID string `json:"chunk_id"`
 	}
@@ -272,10 +334,16 @@ func (s *Server) toolDeleteChunk(args json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return deleted, nil
+
+	// Remove from vector index (DB cascade deletes embedding)
+	if deleted && s.index != nil {
+		s.index.Remove(params.ChunkID)
+	}
+
+	return map[string]bool{"deleted": deleted}, nil
 }
 
-func (s *Server) toolGetMetadataIndex(args json.RawMessage) (interface{}, error) {
+func (s *Server) toolGetMetadataIndex(_ context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		TopN int `json:"top_n"`
 	}
@@ -288,7 +356,7 @@ func (s *Server) toolGetMetadataIndex(args json.RawMessage) (interface{}, error)
 	return result, nil
 }
 
-func (s *Server) toolGetMetadataValues(args json.RawMessage) (interface{}, error) {
+func (s *Server) toolGetMetadataValues(_ context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		Key  string `json:"key"`
 		TopN int    `json:"top_n"`
@@ -305,4 +373,68 @@ func (s *Server) toolGetMetadataValues(args json.RawMessage) (interface{}, error
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *Server) toolSemanticSearch(ctx context.Context, args json.RawMessage) (interface{}, error) {
+	if s.embedder == nil {
+		return nil, fmt.Errorf("embedding provider not configured")
+	}
+
+	var params struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %w", err)
+	}
+	if params.Query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	if params.Limit <= 0 {
+		params.Limit = 10
+	}
+
+	// Get query embedding
+	vecs, err := s.embedder.Embed(ctx, []string{params.Query})
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	if len(vecs) == 0 {
+		return nil, fmt.Errorf("no embedding returned")
+	}
+
+	// Search vector index
+	results := s.index.Search(vecs[0], params.Limit)
+
+	// Fetch chunk details
+	type resultWithChunk struct {
+		ID       string          `json:"id"`
+		Score    float32         `json:"score"`
+		Content  string          `json:"content"`
+		Metadata json.RawMessage `json:"metadata,omitempty"`
+	}
+
+	output := make([]resultWithChunk, 0, len(results))
+	for _, r := range results {
+		chunk, err := s.db.GetChunk(r.ID)
+		if err != nil || chunk == nil {
+			continue
+		}
+		content := chunk.Content
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		output = append(output, resultWithChunk{
+			ID:       r.ID,
+			Score:    r.Score,
+			Content:  content,
+			Metadata: chunk.Metadata,
+		})
+	}
+
+	return map[string]interface{}{
+		"results": output,
+		"query":   params.Query,
+		"count":   len(output),
+	}, nil
 }

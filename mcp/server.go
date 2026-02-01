@@ -2,13 +2,16 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 
+	"github.com/neoden/mykb/embedding"
 	"github.com/neoden/mykb/storage"
+	"github.com/neoden/mykb/vector"
 )
 
 const (
@@ -19,18 +22,23 @@ const (
 
 // Server is an MCP server.
 type Server struct {
-	db    *storage.DB
-	tools map[string]ToolHandler
+	db       *storage.DB
+	embedder embedding.EmbeddingProvider
+	index    *vector.Index
+	tools    map[string]ToolHandler
 }
 
 // ToolHandler handles a tool call.
-type ToolHandler func(args json.RawMessage) (interface{}, error)
+type ToolHandler func(ctx context.Context, args json.RawMessage) (interface{}, error)
 
 // NewServer creates a new MCP server.
-func NewServer(db *storage.DB) *Server {
+// embedder can be nil if embedding provider is not configured.
+func NewServer(db *storage.DB, embedder embedding.EmbeddingProvider, index *vector.Index) *Server {
 	s := &Server{
-		db:    db,
-		tools: make(map[string]ToolHandler),
+		db:       db,
+		embedder: embedder,
+		index:    index,
+		tools:    make(map[string]ToolHandler),
 	}
 	s.registerTools()
 	return s
@@ -65,8 +73,8 @@ func (s *Server) ServeStdio() error {
 			continue
 		}
 
-		// Handle request
-		resp := s.HandleRequest(&req)
+		// Handle request (stdio has no cancellation, use background context)
+		resp := s.HandleRequest(context.Background(), &req)
 		if resp != nil {
 			if err := encoder.Encode(resp); err != nil {
 				log.Printf("Write error: %v", err)
@@ -77,7 +85,8 @@ func (s *Server) ServeStdio() error {
 
 // HandleRequest processes a single MCP request and returns a response.
 // Returns nil for notifications (requests without an ID).
-func (s *Server) HandleRequest(req *Request) *Response {
+// The context is used to cancel long-running operations (e.g., embedding API calls).
+func (s *Server) HandleRequest(ctx context.Context, req *Request) *Response {
 	log.Printf("Request: %s", req.Method)
 
 	// Notifications have no id and expect no response
@@ -97,7 +106,7 @@ func (s *Server) HandleRequest(req *Request) *Response {
 	case "tools/list":
 		result = s.handleToolsList()
 	case "tools/call":
-		result, err = s.handleToolsCall(req.Params)
+		result, err = s.handleToolsCall(ctx, req.Params)
 	default:
 		err = &Error{
 			Code:    CodeMethodNotFound,
@@ -150,7 +159,7 @@ func (s *Server) handleToolsList() *ToolsListResult {
 	}
 }
 
-func (s *Server) handleToolsCall(params json.RawMessage) (*CallToolResult, *Error) {
+func (s *Server) handleToolsCall(ctx context.Context, params json.RawMessage) (*CallToolResult, *Error) {
 	var p CallToolParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &Error{
@@ -167,7 +176,7 @@ func (s *Server) handleToolsCall(params json.RawMessage) (*CallToolResult, *Erro
 		}
 	}
 
-	result, err := handler(p.Arguments)
+	result, err := handler(ctx, p.Arguments)
 	if err != nil {
 		return &CallToolResult{
 			Content: []Content{TextContent(err.Error())},

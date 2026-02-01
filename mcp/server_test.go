@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/neoden/mykb/storage"
+	"github.com/neoden/mykb/vector"
 )
 
 func setupTestServer(t *testing.T) *Server {
@@ -23,7 +26,7 @@ func setupTestServer(t *testing.T) *Server {
 		t.Fatalf("Migrate: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return NewServer(db)
+	return NewServer(db, nil, vector.NewIndex())
 }
 
 // Helper to call server with JSON-RPC request
@@ -47,7 +50,7 @@ func call(t *testing.T, s *Server, method string, params interface{}) json.RawMe
 	}
 
 	// Use handleRequest directly
-	resp := s.HandleRequest(req)
+	resp := s.HandleRequest(context.Background(), req)
 	if resp == nil {
 		t.Fatal("Expected response, got nil")
 	}
@@ -81,7 +84,7 @@ func callExpectError(t *testing.T, s *Server, method string, params interface{})
 		Params:  paramsRaw,
 	}
 
-	resp := s.HandleRequest(req)
+	resp := s.HandleRequest(context.Background(), req)
 	if resp == nil {
 		t.Fatal("Expected response, got nil")
 	}
@@ -126,8 +129,8 @@ func TestToolsList(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if len(list.Tools) != 7 {
-		t.Errorf("len(tools) = %d, want 7", len(list.Tools))
+	if len(list.Tools) != 8 {
+		t.Errorf("len(tools) = %d, want 8", len(list.Tools))
 	}
 
 	// Check tool names
@@ -140,6 +143,7 @@ func TestToolsList(t *testing.T) {
 		"store_chunk", "search_chunks", "get_chunk",
 		"update_chunk", "delete_chunk",
 		"get_metadata_index", "get_metadata_values",
+		"semantic_search",
 	}
 	for _, name := range expected {
 		if !names[name] {
@@ -340,8 +344,12 @@ func TestToolsCallDeleteChunk(t *testing.T) {
 	var got CallToolResult
 	json.Unmarshal(getResult, &got)
 
-	if got.StructuredContent != nil {
-		t.Error("Expected nil for deleted chunk")
+	// Should return {"found": false}
+	data2, _ := json.Marshal(got.StructuredContent)
+	var notFound map[string]interface{}
+	json.Unmarshal(data2, &notFound)
+	if found, ok := notFound["found"].(bool); !ok || found {
+		t.Errorf("Expected found=false, got %v", notFound)
 	}
 }
 
@@ -412,7 +420,7 @@ func TestNotificationNoResponse(t *testing.T) {
 		// No ID = notification
 	}
 
-	resp := s.HandleRequest(req)
+	resp := s.HandleRequest(context.Background(), req)
 	if resp != nil {
 		t.Error("Notifications should not return response")
 	}
@@ -505,6 +513,292 @@ func TestToolsCallGetChunkNotFound(t *testing.T) {
 	// Should succeed but return null
 	if callResult.IsError {
 		t.Error("Should not be error, just null result")
+	}
+}
+
+func TestSemanticSearchNoProvider(t *testing.T) {
+	s := setupTestServer(t) // embedder is nil
+
+	result := call(t, s, "tools/call", map[string]interface{}{
+		"name": "semantic_search",
+		"arguments": map[string]interface{}{
+			"query": "test query",
+		},
+	})
+
+	var callResult CallToolResult
+	json.Unmarshal(result, &callResult)
+
+	if !callResult.IsError {
+		t.Error("Expected error when embedder is nil")
+	}
+}
+
+func TestSemanticSearchWithMockEmbedder(t *testing.T) {
+	dir := t.TempDir()
+	db, err := storage.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	// Create mock embedder
+	embedder := &mockEmbedder{
+		embedding: []float32{0.1, 0.2, 0.3},
+	}
+
+	idx := vector.NewIndex()
+	s := NewServer(db, embedder, idx)
+
+	// Store a chunk (this will generate embedding via mock)
+	call(t, s, "tools/call", map[string]interface{}{
+		"name": "store_chunk",
+		"arguments": map[string]interface{}{
+			"content": "test content",
+		},
+	})
+
+	// Verify embedding was added to index
+	if idx.Size() != 1 {
+		t.Errorf("Index size = %d, want 1", idx.Size())
+	}
+
+	// Search
+	result := call(t, s, "tools/call", map[string]interface{}{
+		"name": "semantic_search",
+		"arguments": map[string]interface{}{
+			"query": "test",
+		},
+	})
+
+	var callResult CallToolResult
+	json.Unmarshal(result, &callResult)
+
+	if callResult.IsError {
+		t.Error("Expected success")
+	}
+
+	data, _ := json.Marshal(callResult.StructuredContent)
+	var searchResult map[string]interface{}
+	json.Unmarshal(data, &searchResult)
+
+	count := searchResult["count"].(float64)
+	if count != 1 {
+		t.Errorf("count = %v, want 1", count)
+	}
+}
+
+// mockEmbedder returns fixed embeddings for testing
+type mockEmbedder struct {
+	embedding []float32
+}
+
+func (m *mockEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	result := make([][]float32, len(texts))
+	for i := range texts {
+		result[i] = m.embedding
+	}
+	return result, nil
+}
+
+func (m *mockEmbedder) Dimensions() int {
+	return len(m.embedding)
+}
+
+func (m *mockEmbedder) Model() string {
+	return "mock/test"
+}
+
+// failingEmbedder always returns an error
+type failingEmbedder struct{}
+
+func (f *failingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return nil, fmt.Errorf("embedding service unavailable")
+}
+
+func (f *failingEmbedder) Dimensions() int {
+	return 768
+}
+
+func (f *failingEmbedder) Model() string {
+	return "mock/failing"
+}
+
+func TestUpdateChunkReEmbedsContent(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := storage.Open(filepath.Join(dir, "test.db"))
+	db.Migrate()
+	t.Cleanup(func() { db.Close() })
+
+	embedder := &mockEmbedder{embedding: []float32{0.1, 0.2, 0.3}}
+	idx := vector.NewIndex()
+	s := NewServer(db, embedder, idx)
+
+	// Store chunk
+	storeResult := call(t, s, "tools/call", map[string]interface{}{
+		"name": "store_chunk",
+		"arguments": map[string]interface{}{
+			"content": "original",
+		},
+	})
+
+	var stored CallToolResult
+	json.Unmarshal(storeResult, &stored)
+	data, _ := json.Marshal(stored.StructuredContent)
+	var chunk storage.Chunk
+	json.Unmarshal(data, &chunk)
+
+	// Update content
+	call(t, s, "tools/call", map[string]interface{}{
+		"name": "update_chunk",
+		"arguments": map[string]interface{}{
+			"chunk_id": chunk.ID,
+			"content":  "updated",
+		},
+	})
+
+	// Embedding should still be in index
+	if idx.Size() != 1 {
+		t.Errorf("Index size = %d, want 1", idx.Size())
+	}
+}
+
+func TestDeleteChunkRemovesFromIndex(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := storage.Open(filepath.Join(dir, "test.db"))
+	db.Migrate()
+	t.Cleanup(func() { db.Close() })
+
+	embedder := &mockEmbedder{embedding: []float32{0.1, 0.2, 0.3}}
+	idx := vector.NewIndex()
+	s := NewServer(db, embedder, idx)
+
+	// Store chunk
+	storeResult := call(t, s, "tools/call", map[string]interface{}{
+		"name": "store_chunk",
+		"arguments": map[string]interface{}{
+			"content": "delete me",
+		},
+	})
+
+	var stored CallToolResult
+	json.Unmarshal(storeResult, &stored)
+	data, _ := json.Marshal(stored.StructuredContent)
+	var chunk storage.Chunk
+	json.Unmarshal(data, &chunk)
+
+	if idx.Size() != 1 {
+		t.Fatalf("Index size after store = %d, want 1", idx.Size())
+	}
+
+	// Delete chunk
+	call(t, s, "tools/call", map[string]interface{}{
+		"name": "delete_chunk",
+		"arguments": map[string]interface{}{
+			"chunk_id": chunk.ID,
+		},
+	})
+
+	// Should be removed from index
+	if idx.Size() != 0 {
+		t.Errorf("Index size after delete = %d, want 0", idx.Size())
+	}
+}
+
+func TestStoreChunkSucceedsWithFailingEmbedder(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := storage.Open(filepath.Join(dir, "test.db"))
+	db.Migrate()
+	t.Cleanup(func() { db.Close() })
+
+	embedder := &failingEmbedder{}
+	idx := vector.NewIndex()
+	s := NewServer(db, embedder, idx)
+
+	// Store chunk - should succeed even if embedding fails
+	result := call(t, s, "tools/call", map[string]interface{}{
+		"name": "store_chunk",
+		"arguments": map[string]interface{}{
+			"content": "test content",
+		},
+	})
+
+	var callResult CallToolResult
+	json.Unmarshal(result, &callResult)
+
+	if callResult.IsError {
+		t.Errorf("store_chunk should succeed even if embedding fails: %v", callResult.StructuredContent)
+	}
+
+	// Chunk should be created
+	data, _ := json.Marshal(callResult.StructuredContent)
+	var chunk storage.Chunk
+	json.Unmarshal(data, &chunk)
+
+	if chunk.ID == "" {
+		t.Error("Chunk should have an ID")
+	}
+	if chunk.Content != "test content" {
+		t.Errorf("Content = %q, want %q", chunk.Content, "test content")
+	}
+
+	// But index should be empty (embedding failed)
+	if idx.Size() != 0 {
+		t.Errorf("Index size = %d, want 0 (embedding should have failed)", idx.Size())
+	}
+}
+
+func TestUpdateChunkSucceedsWithFailingEmbedder(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := storage.Open(filepath.Join(dir, "test.db"))
+	db.Migrate()
+	t.Cleanup(func() { db.Close() })
+
+	// Create chunk without embedder first
+	idx := vector.NewIndex()
+	s := NewServer(db, nil, idx)
+
+	storeResult := call(t, s, "tools/call", map[string]interface{}{
+		"name": "store_chunk",
+		"arguments": map[string]interface{}{
+			"content": "original",
+		},
+	})
+
+	var stored CallToolResult
+	json.Unmarshal(storeResult, &stored)
+	data, _ := json.Marshal(stored.StructuredContent)
+	var chunk storage.Chunk
+	json.Unmarshal(data, &chunk)
+
+	// Now update with failing embedder
+	s2 := NewServer(db, &failingEmbedder{}, idx)
+
+	updateResult := call(t, s2, "tools/call", map[string]interface{}{
+		"name": "update_chunk",
+		"arguments": map[string]interface{}{
+			"chunk_id": chunk.ID,
+			"content":  "updated",
+		},
+	})
+
+	var updateCallResult CallToolResult
+	json.Unmarshal(updateResult, &updateCallResult)
+
+	if updateCallResult.IsError {
+		t.Errorf("update_chunk should succeed even if embedding fails: %v", updateCallResult.StructuredContent)
+	}
+
+	// Content should be updated
+	data2, _ := json.Marshal(updateCallResult.StructuredContent)
+	var updatedChunk storage.Chunk
+	json.Unmarshal(data2, &updatedChunk)
+
+	if updatedChunk.Content != "updated" {
+		t.Errorf("Content = %q, want %q", updatedChunk.Content, "updated")
 	}
 }
 

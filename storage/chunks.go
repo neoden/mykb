@@ -79,6 +79,32 @@ func (db *DB) GetChunk(id string) (*Chunk, error) {
 	return &chunk, nil
 }
 
+// GetAllChunks returns all chunks.
+func (db *DB) GetAllChunks() ([]Chunk, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, content, metadata, created_at, updated_at
+		FROM chunks ORDER BY created_at
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("get all chunks: %w", err)
+	}
+	defer rows.Close()
+
+	var chunks []Chunk
+	for rows.Next() {
+		var chunk Chunk
+		var metaStr sql.NullString
+		if err := rows.Scan(&chunk.ID, &chunk.Content, &metaStr, &chunk.CreatedAt, &chunk.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan chunk: %w", err)
+		}
+		if metaStr.Valid {
+			chunk.Metadata = json.RawMessage(metaStr.String)
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks, rows.Err()
+}
+
 // UpdateChunk updates an existing chunk.
 func (db *DB) UpdateChunk(id string, content *string, metadata json.RawMessage) (*Chunk, error) {
 	existing, err := db.GetChunk(id)
