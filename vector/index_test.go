@@ -152,3 +152,24 @@ func TestCosineSimilarityZeroVector(t *testing.T) {
 		t.Errorf("cosineSimilarity with zero vector = %f, want 0", got)
 	}
 }
+
+func TestSearchDimensionMismatch(t *testing.T) {
+	idx := NewIndex()
+	idx.Add("dim3", []float32{1, 0, 0})       // 3 dimensions
+	idx.Add("dim4", []float32{1, 0, 0, 0})    // 4 dimensions - mismatch
+	idx.Add("dim3b", []float32{0.9, 0.1, 0})  // 3 dimensions
+
+	// Search with 3-dim query should skip the 4-dim vector
+	results := idx.Search([]float32{1, 0, 0}, 10)
+
+	if len(results) != 2 {
+		t.Errorf("len(results) = %d, want 2 (should skip mismatched dimension)", len(results))
+	}
+
+	// Check that dim4 is not in results
+	for _, r := range results {
+		if r.ID == "dim4" {
+			t.Error("dim4 should be skipped due to dimension mismatch")
+		}
+	}
+}

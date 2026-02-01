@@ -708,7 +708,7 @@ func TestDeleteChunkRemovesFromIndex(t *testing.T) {
 	}
 }
 
-func TestStoreChunkSucceedsWithFailingEmbedder(t *testing.T) {
+func TestStoreChunkFailsWithFailingEmbedder(t *testing.T) {
 	dir := t.TempDir()
 	db, _ := storage.Open(filepath.Join(dir, "test.db"))
 	db.Migrate()
@@ -718,7 +718,7 @@ func TestStoreChunkSucceedsWithFailingEmbedder(t *testing.T) {
 	idx := vector.NewIndex()
 	s := NewServer(db, embedder, idx)
 
-	// Store chunk - should succeed even if embedding fails
+	// Store chunk - should fail because embedding is required when embedder is configured
 	result := call(t, s, "tools/call", map[string]interface{}{
 		"name": "store_chunk",
 		"arguments": map[string]interface{}{
@@ -729,29 +729,24 @@ func TestStoreChunkSucceedsWithFailingEmbedder(t *testing.T) {
 	var callResult CallToolResult
 	json.Unmarshal(result, &callResult)
 
-	if callResult.IsError {
-		t.Errorf("store_chunk should succeed even if embedding fails: %v", callResult.StructuredContent)
+	// Should fail - embedding is required when embedder is configured
+	if !callResult.IsError {
+		t.Error("store_chunk should fail when embedder is configured but fails")
 	}
 
-	// Chunk should be created
-	data, _ := json.Marshal(callResult.StructuredContent)
-	var chunk storage.Chunk
-	json.Unmarshal(data, &chunk)
-
-	if chunk.ID == "" {
-		t.Error("Chunk should have an ID")
-	}
-	if chunk.Content != "test content" {
-		t.Errorf("Content = %q, want %q", chunk.Content, "test content")
+	// Chunk should NOT be created (transaction rolled back)
+	chunks, _ := db.GetAllChunks()
+	if len(chunks) != 0 {
+		t.Errorf("No chunks should exist after failed store, got %d", len(chunks))
 	}
 
-	// But index should be empty (embedding failed)
+	// Index should be empty
 	if idx.Size() != 0 {
-		t.Errorf("Index size = %d, want 0 (embedding should have failed)", idx.Size())
+		t.Errorf("Index size = %d, want 0", idx.Size())
 	}
 }
 
-func TestUpdateChunkSucceedsWithFailingEmbedder(t *testing.T) {
+func TestUpdateChunkFailsWithFailingEmbedder(t *testing.T) {
 	dir := t.TempDir()
 	db, _ := storage.Open(filepath.Join(dir, "test.db"))
 	db.Migrate()
@@ -788,17 +783,15 @@ func TestUpdateChunkSucceedsWithFailingEmbedder(t *testing.T) {
 	var updateCallResult CallToolResult
 	json.Unmarshal(updateResult, &updateCallResult)
 
-	if updateCallResult.IsError {
-		t.Errorf("update_chunk should succeed even if embedding fails: %v", updateCallResult.StructuredContent)
+	// Should fail - embedding is required when embedder is configured
+	if !updateCallResult.IsError {
+		t.Error("update_chunk should fail when embedder is configured but fails")
 	}
 
-	// Content should be updated
-	data2, _ := json.Marshal(updateCallResult.StructuredContent)
-	var updatedChunk storage.Chunk
-	json.Unmarshal(data2, &updatedChunk)
-
-	if updatedChunk.Content != "updated" {
-		t.Errorf("Content = %q, want %q", updatedChunk.Content, "updated")
+	// Content should NOT be updated (transaction rolled back)
+	dbChunk, _ := db.GetChunk(chunk.ID)
+	if dbChunk.Content != "original" {
+		t.Errorf("Content = %q, want %q (should not be updated)", dbChunk.Content, "original")
 	}
 }
 

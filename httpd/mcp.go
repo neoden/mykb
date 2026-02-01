@@ -30,7 +30,8 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON-RPC request
 	var req mcp.Request
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, http.StatusOK, mcp.Response{
+		// JSON-RPC spec: parse errors should return HTTP 400 for HTTP transport
+		writeJSON(w, http.StatusBadRequest, mcp.Response{
 			JSONRPC: "2.0",
 			Error: &mcp.Error{
 				Code:    mcp.CodeParseError,

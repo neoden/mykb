@@ -43,6 +43,11 @@ func main() {
 		cfg = config.Default()
 	}
 
+	// Validate config
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid config: %v", err)
+	}
+
 	args := flag.Args()
 	if len(args) == 0 {
 		usage()

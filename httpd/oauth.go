@@ -48,6 +48,9 @@ type tokenResponse struct {
 	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
+// maxOAuthBodySize limits request body for OAuth endpoints (64KB).
+const maxOAuthBodySize = 64 * 1024
+
 // validateRedirectURI checks that a redirect URI is safe.
 // Allows https://* and http://localhost only.
 func validateRedirectURI(uri string) error {
@@ -95,6 +98,8 @@ func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBodySize)
+
 	var req clientRegistration
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -173,7 +178,11 @@ func (s *Server) handleAuthorizeGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate CSRF token with bound parameters
-	csrfToken := GenerateToken()
+	csrfToken, err := GenerateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
 	csrfExpiry := time.Now().Add(5 * time.Minute).Unix()
 	s.db.StoreToken(storage.HashToken(csrfToken), storage.TokenCSRF, clientID, csrfExpiry, map[string]string{
 		"client_id":             clientID,
@@ -189,6 +198,8 @@ func (s *Server) handleAuthorizeGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthorizePost(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBodySize)
+
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form")
 		return
@@ -225,7 +236,11 @@ func (s *Server) handleAuthorizePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate authorization code
-	code := GenerateToken()
+	code, err := GenerateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate code")
+		return
+	}
 	codeExpiry := time.Now().Add(s.config.CodeExpiry).Unix()
 	s.db.StoreToken(storage.HashToken(code), storage.TokenAuthCode, clientID, codeExpiry, map[string]string{
 		"client_id":             clientID,
@@ -247,6 +262,8 @@ func (s *Server) handleAuthorizePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBodySize)
+
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form")
 		return
@@ -300,8 +317,16 @@ func (s *Server) handleTokenAuthCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate tokens
-	accessToken := GenerateToken()
-	refreshToken := GenerateToken()
+	accessToken, err := GenerateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	refreshToken, err := GenerateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
 
 	// Store tokens in database
 	now := time.Now()
@@ -360,8 +385,16 @@ func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 	s.db.DeleteToken(hash)
 
 	// Generate new tokens
-	newAccessToken := GenerateToken()
-	newRefreshToken := GenerateToken()
+	newAccessToken, err := GenerateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	newRefreshToken, err := GenerateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
 
 	now := time.Now()
 	accessExpiry := now.Add(s.config.TokenExpiry).Unix()

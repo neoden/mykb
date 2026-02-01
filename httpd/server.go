@@ -142,6 +142,7 @@ func (s *Server) listenAndServeTLS() error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.rateLimiter.Stop()
 	return nil
 }
 
@@ -161,6 +162,12 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := strings.TrimPrefix(auth, "Bearer ")
+		if token == "" {
+			log.Printf("AUTH FAILED: empty token from %s", getIP(r))
+			w.Header().Set("WWW-Authenticate", `Bearer realm="mykb"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing token"})
+			return
+		}
 		hash := storage.HashToken(token)
 
 		_, err := s.db.ValidateToken(hash, storage.TokenAccess)

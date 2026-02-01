@@ -22,18 +22,18 @@ const (
 
 // Server is an MCP server.
 type Server struct {
-	db       *storage.DB
+	db       storage.TxStorage
 	embedder embedding.EmbeddingProvider
 	index    *vector.Index
 	tools    map[string]ToolHandler
 }
 
 // ToolHandler handles a tool call.
-type ToolHandler func(ctx context.Context, args json.RawMessage) (interface{}, error)
+type ToolHandler func(ctx context.Context, args json.RawMessage) (any, error)
 
 // NewServer creates a new MCP server.
 // embedder can be nil if embedding provider is not configured.
-func NewServer(db *storage.DB, embedder embedding.EmbeddingProvider, index *vector.Index) *Server {
+func NewServer(db storage.TxStorage, embedder embedding.EmbeddingProvider, index *vector.Index) *Server {
 	s := &Server{
 		db:       db,
 		embedder: embedder,

@@ -3,8 +3,14 @@ package httpd
 import "testing"
 
 func TestGenerateToken(t *testing.T) {
-	t1 := GenerateToken()
-	t2 := GenerateToken()
+	t1, err := GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken() error: %v", err)
+	}
+	t2, err := GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken() error: %v", err)
+	}
 
 	if t1 == t2 {
 		t.Error("Tokens should be unique")

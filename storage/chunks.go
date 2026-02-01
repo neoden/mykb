@@ -28,6 +28,10 @@ type SearchResult struct {
 
 // CreateChunk creates a new chunk.
 func (db *DB) CreateChunk(content string, metadata json.RawMessage) (*Chunk, error) {
+	return createChunk(db.conn, content, metadata)
+}
+
+func createChunk(exec sqlExecutor, content string, metadata json.RawMessage) (*Chunk, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
 
@@ -37,7 +41,7 @@ func (db *DB) CreateChunk(content string, metadata json.RawMessage) (*Chunk, err
 		metaStr = &s
 	}
 
-	_, err := db.conn.Exec(`
+	_, err := exec.Exec(`
 		INSERT INTO chunks (id, content, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 	`, id, content, metaStr, now, now)
@@ -56,10 +60,14 @@ func (db *DB) CreateChunk(content string, metadata json.RawMessage) (*Chunk, err
 
 // GetChunk retrieves a chunk by ID.
 func (db *DB) GetChunk(id string) (*Chunk, error) {
+	return getChunk(db.conn, id)
+}
+
+func getChunk(exec sqlExecutor, id string) (*Chunk, error) {
 	var chunk Chunk
 	var metaStr sql.NullString
 
-	err := db.conn.QueryRow(`
+	err := exec.QueryRow(`
 		SELECT id, content, metadata, created_at, updated_at
 		FROM chunks WHERE id = ?
 	`, id).Scan(&chunk.ID, &chunk.Content, &metaStr, &chunk.CreatedAt, &chunk.UpdatedAt)
@@ -106,7 +114,11 @@ func (db *DB) GetAllChunks() ([]Chunk, error) {
 
 // UpdateChunk updates an existing chunk.
 func (db *DB) UpdateChunk(id string, content *string, metadata json.RawMessage) (*Chunk, error) {
-	existing, err := db.GetChunk(id)
+	return updateChunk(db.conn, id, content, metadata)
+}
+
+func updateChunk(exec sqlExecutor, id string, content *string, metadata json.RawMessage) (*Chunk, error) {
+	existing, err := getChunk(exec, id)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +144,7 @@ func (db *DB) UpdateChunk(id string, content *string, metadata json.RawMessage) 
 		metaStr = &s
 	}
 
-	_, err = db.conn.Exec(`
+	_, err = exec.Exec(`
 		UPDATE chunks SET content = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
 	`, newContent, metaStr, now, id)

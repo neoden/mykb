@@ -1,6 +1,7 @@
 package vector
 
 import (
+	"log"
 	"math"
 	"sort"
 	"sync"
@@ -62,10 +63,21 @@ func (idx *Index) Search(query []float32, k int) []Result {
 		return nil
 	}
 
+	queryDim := len(query)
+	skipped := 0
+
 	results := make([]Result, 0, len(idx.vecs))
 	for id, vec := range idx.vecs {
+		if len(vec) != queryDim {
+			skipped++
+			continue
+		}
 		score := cosineSimilarity(query, vec)
 		results = append(results, Result{ID: id, Score: score})
+	}
+
+	if skipped > 0 {
+		log.Printf("WARNING: vector search skipped %d vectors with dimension mismatch (query=%d)", skipped, queryDim)
 	}
 
 	sort.Slice(results, func(i, j int) bool {

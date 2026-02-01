@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/neoden/mykb/embedding"
 	"github.com/pelletier/go-toml/v2"
@@ -99,4 +101,93 @@ func SearchPaths() []string {
 		filepath.Join(configDir, "mykb", "config.toml"),
 		"/etc/mykb/config.toml",
 	}
+}
+
+// Validate checks the configuration for errors.
+// Returns nil if the configuration is valid.
+func (c *Config) Validate() error {
+	// Validate data directory
+	if err := validateDataDir(c.DataDir); err != nil {
+		return fmt.Errorf("data_dir: %w", err)
+	}
+
+	// Validate server config
+	if c.Server.Listen != "" && c.Server.Domain != "" {
+		return fmt.Errorf("server: listen and domain are mutually exclusive")
+	}
+
+	// Validate embedding config
+	if err := validateEmbedding(&c.Embedding); err != nil {
+		return fmt.Errorf("embedding: %w", err)
+	}
+
+	return nil
+}
+
+// validateDataDir checks if the data directory is usable.
+func validateDataDir(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("path is empty")
+	}
+
+	info, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		// Try to create it
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("cannot create directory: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cannot access: %w", err)
+	}
+
+	if !info.IsDir() {
+		return fmt.Errorf("path exists but is not a directory")
+	}
+
+	// Check if writable by creating a temp file
+	testFile := filepath.Join(dir, ".write_test")
+	f, err := os.Create(testFile)
+	if err != nil {
+		return fmt.Errorf("directory is not writable: %w", err)
+	}
+	f.Close()
+	os.Remove(testFile)
+
+	return nil
+}
+
+// validateEmbedding checks embedding configuration.
+func validateEmbedding(cfg *embedding.Config) error {
+	switch cfg.Provider {
+	case "":
+		// No provider configured - that's OK
+		return nil
+
+	case "openai":
+		if cfg.OpenAI.APIKey == "" {
+			return fmt.Errorf("openai.api_key is required")
+		}
+		// Basic format check for API key
+		if !strings.HasPrefix(cfg.OpenAI.APIKey, "sk-") {
+			return fmt.Errorf("openai.api_key should start with 'sk-'")
+		}
+
+	case "ollama":
+		if cfg.Ollama.URL != "" {
+			u, err := url.Parse(cfg.Ollama.URL)
+			if err != nil {
+				return fmt.Errorf("ollama.url is invalid: %w", err)
+			}
+			if u.Scheme != "http" && u.Scheme != "https" {
+				return fmt.Errorf("ollama.url must use http or https scheme")
+			}
+		}
+
+	default:
+		return fmt.Errorf("unknown provider: %s (valid: openai, ollama)", cfg.Provider)
+	}
+
+	return nil
 }

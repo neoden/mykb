@@ -179,3 +179,161 @@ func TestSearchPathsWithXDG(t *testing.T) {
 		t.Errorf("First path = %q, want /custom/config/mykb/config.toml", paths[0])
 	}
 }
+
+func TestValidateDataDir(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := Default()
+	cfg.DataDir = dir
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Valid data_dir should pass: %v", err)
+	}
+}
+
+func TestValidateDataDirCreatesDir(t *testing.T) {
+	dir := t.TempDir()
+	newDir := filepath.Join(dir, "new", "nested")
+
+	cfg := Default()
+	cfg.DataDir = newDir
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Should create nested directory: %v", err)
+	}
+
+	if _, err := os.Stat(newDir); os.IsNotExist(err) {
+		t.Error("Directory should have been created")
+	}
+}
+
+func TestValidateDataDirNotWritable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Permission test not reliable on Windows")
+	}
+
+	dir := t.TempDir()
+	readOnlyDir := filepath.Join(dir, "readonly")
+	os.Mkdir(readOnlyDir, 0500) // read + execute only
+	defer os.Chmod(readOnlyDir, 0700)
+
+	cfg := Default()
+	cfg.DataDir = readOnlyDir
+
+	if err := cfg.Validate(); err == nil {
+		t.Error("Read-only directory should fail validation")
+	}
+}
+
+func TestValidateServerMutuallyExclusive(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := Default()
+	cfg.DataDir = dir
+	cfg.Server.Listen = ":8080"
+	cfg.Server.Domain = "example.com"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("Listen and Domain together should fail")
+	}
+	if err != nil && !contains(err.Error(), "mutually exclusive") {
+		t.Errorf("Error should mention mutually exclusive: %v", err)
+	}
+}
+
+func TestValidateEmbeddingOpenAI(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		apiKey  string
+		wantErr bool
+	}{
+		{"valid key", "sk-test123", false},
+		{"empty key", "", true},
+		{"invalid prefix", "invalid-key", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.DataDir = dir
+			cfg.Embedding.Provider = "openai"
+			cfg.Embedding.OpenAI.APIKey = tt.apiKey
+
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateEmbeddingOllama(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"default (empty)", "", false},
+		{"http url", "http://localhost:11434", false},
+		{"https url", "https://ollama.example.com", false},
+		{"invalid scheme", "ftp://localhost", true},
+		{"invalid url", "://invalid", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.DataDir = dir
+			cfg.Embedding.Provider = "ollama"
+			cfg.Embedding.Ollama.URL = tt.url
+
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateEmbeddingUnknownProvider(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := Default()
+	cfg.DataDir = dir
+	cfg.Embedding.Provider = "unknown"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("Unknown provider should fail")
+	}
+}
+
+func TestValidateNoEmbeddingProvider(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := Default()
+	cfg.DataDir = dir
+	cfg.Embedding.Provider = ""
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("No embedding provider should be valid: %v", err)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr, 0))
+}
+
+func containsAt(s, substr string, start int) bool {
+	for i := start; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

@@ -8,8 +8,12 @@ import (
 
 // SaveEmbedding saves an embedding for a chunk.
 func (db *DB) SaveEmbedding(chunkID, model string, vec []float32) error {
+	return saveEmbedding(db.conn, chunkID, model, vec)
+}
+
+func saveEmbedding(exec sqlExecutor, chunkID, model string, vec []float32) error {
 	blob := float32ToBytes(vec)
-	_, err := db.conn.Exec(`
+	_, err := exec.Exec(`
 		INSERT INTO embeddings (chunk_id, model, embedding)
 		VALUES (?, ?, ?)
 		ON CONFLICT(chunk_id) DO UPDATE SET

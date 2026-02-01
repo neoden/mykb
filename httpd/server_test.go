@@ -16,6 +16,16 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// mustGenerateToken is a test helper that generates a token and fails on error.
+func mustGenerateToken(t *testing.T) string {
+	t.Helper()
+	token, err := GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	return token
+}
+
 func setupTestServer(t *testing.T) (*Server, *storage.DB) {
 	t.Helper()
 	dir := t.TempDir()
@@ -217,7 +227,7 @@ func TestMCPWithValidToken(t *testing.T) {
 	server, db := setupTestServer(t)
 
 	// Create valid token
-	token := GenerateToken()
+	token := mustGenerateToken(t)
 	hash := storage.HashToken(token)
 	expiry := time.Now().Add(time.Hour).Unix()
 	db.StoreToken(hash, storage.TokenAccess, "client", expiry, nil)
@@ -352,7 +362,7 @@ func TestAuthorizePostNoPasswordConfigured(t *testing.T) {
 	db.CreateClient("test-client", "Test", []string{"http://localhost/callback"})
 
 	// Store a CSRF token manually
-	csrfToken := GenerateToken()
+	csrfToken := mustGenerateToken(t)
 	csrfExpiry := time.Now().Add(time.Minute).Unix()
 	db.StoreToken(storage.HashToken(csrfToken), storage.TokenCSRF, "test-client", csrfExpiry, map[string]string{
 		"client_id":             "test-client",
@@ -795,7 +805,7 @@ func TestRefreshTokenClientMismatch(t *testing.T) {
 	db.CreateClient("client-b", "Test B", []string{"http://localhost/callback"})
 
 	// Create refresh token for client-a
-	refreshToken := GenerateToken()
+	refreshToken := mustGenerateToken(t)
 	expiry := time.Now().Add(time.Hour).Unix()
 	db.StoreToken(storage.HashToken(refreshToken), storage.TokenRefresh, "client-a", expiry, nil)
 
@@ -819,7 +829,7 @@ func TestRefreshTokenClientMismatch(t *testing.T) {
 func TestMCPInvalidContentType(t *testing.T) {
 	server, db := setupTestServer(t)
 
-	token := GenerateToken()
+	token := mustGenerateToken(t)
 	hash := storage.HashToken(token)
 	expiry := time.Now().Add(time.Hour).Unix()
 	db.StoreToken(hash, storage.TokenAccess, "client", expiry, nil)
@@ -840,7 +850,7 @@ func TestMCPParseError(t *testing.T) {
 	server, db := setupTestServer(t)
 
 	// Create valid token
-	token := GenerateToken()
+	token := mustGenerateToken(t)
 	hash := storage.HashToken(token)
 	expiry := time.Now().Add(time.Hour).Unix()
 	db.StoreToken(hash, storage.TokenAccess, "client", expiry, nil)
@@ -852,8 +862,9 @@ func TestMCPParseError(t *testing.T) {
 
 	server.mux.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Status = %d, want %d (JSON-RPC error in body)", w.Code, http.StatusOK)
+	// JSON-RPC spec: parse errors should return HTTP 400 for HTTP transport
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d (JSON-RPC parse error)", w.Code, http.StatusBadRequest)
 	}
 
 	var resp map[string]interface{}
