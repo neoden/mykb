@@ -330,8 +330,13 @@ func (s *Server) handleTokenAuthCode(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 	refreshToken := r.FormValue("refresh_token")
+	clientID := r.FormValue("client_id")
 	if refreshToken == "" {
 		writeError(w, http.StatusBadRequest, "missing refresh_token")
+		return
+	}
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "missing client_id")
 		return
 	}
 
@@ -341,6 +346,13 @@ func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("AUTH FAILED: invalid refresh token from %s", getIP(r))
 		writeError(w, http.StatusBadRequest, "invalid or expired refresh_token")
+		return
+	}
+
+	// Verify token belongs to this client (RFC 6749 Section 6)
+	if token.ClientID != clientID {
+		log.Printf("AUTH FAILED: refresh token client mismatch from %s", getIP(r))
+		writeError(w, http.StatusBadRequest, "invalid refresh_token")
 		return
 	}
 

@@ -850,6 +850,7 @@ func TestFullOAuthFlow(t *testing.T) {
 	refreshForm := url.Values{}
 	refreshForm.Set("grant_type", "refresh_token")
 	refreshForm.Set("refresh_token", tokenResp.RefreshToken)
+	refreshForm.Set("client_id", "flow-client")
 
 	req = httptest.NewRequest("POST", "/token", strings.NewReader(refreshForm.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
