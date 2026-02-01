@@ -8,10 +8,7 @@ Type=simple
 User=mykb
 Group=mykb
 
-# Environment - set MYKB_DOMAIN in /etc/mykb.env
-EnvironmentFile=-/etc/mykb.env
-
-ExecStart=/usr/local/bin/mykb --data /var/lib/mykb serve http --domain ${MYKB_DOMAIN}
+ExecStart=/usr/local/bin/mykb serve http
 
 # Security hardening
 NoNewPrivileges=yes

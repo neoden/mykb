@@ -38,7 +38,7 @@ func Default() *Config {
 			},
 		},
 		Server: ServerConfig{
-			Listen: ":8080",
+			// No default for Listen/Domain - set in main.go if neither specified
 		},
 	}
 }
@@ -79,17 +79,24 @@ func defaultDataDir() string {
 	return filepath.Join(dataDir, "mykb")
 }
 
-// DefaultPath returns the default config file path.
-// On Linux/macOS: $XDG_CONFIG_HOME/mykb/config.toml or ~/.config/mykb/config.toml
-// On Windows: %APPDATA%\mykb\config.toml
-func DefaultPath() string {
+// SearchPaths returns config file paths in search order.
+// On Linux/macOS: user config ($XDG_CONFIG_HOME/mykb), then system config (/etc/mykb).
+// On Windows: only user config (%APPDATA%\mykb).
+func SearchPaths() []string {
 	if runtime.GOOS == "windows" {
-		return filepath.Join(os.Getenv("APPDATA"), "mykb", "config.toml")
+		return []string{
+			filepath.Join(os.Getenv("APPDATA"), "mykb", "config.toml"),
+		}
 	}
+
 	configDir := os.Getenv("XDG_CONFIG_HOME")
 	if configDir == "" {
 		home, _ := os.UserHomeDir()
 		configDir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(configDir, "mykb", "config.toml")
+
+	return []string{
+		filepath.Join(configDir, "mykb", "config.toml"),
+		"/etc/mykb/config.toml",
+	}
 }

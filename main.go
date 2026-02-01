@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/neoden/mykb/config"
@@ -29,15 +30,29 @@ func main() {
 	log.SetOutput(os.Stderr)
 
 	// Global flags
-	flag.StringVar(&configPath, "config", config.DefaultPath(), "Config file path")
+	flag.StringVar(&configPath, "config", "", "Config file path")
 	flag.Usage = usage
 	flag.Parse()
 
+	// Find config file
+	if configPath == "" {
+		for _, p := range config.SearchPaths() {
+			if _, err := os.Stat(p); err == nil {
+				configPath = p
+				break
+			}
+		}
+	}
+
 	// Load config
-	var err error
-	cfg, err = config.Load(configPath)
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+	if configPath != "" {
+		var err error
+		cfg, err = config.Load(configPath)
+		if err != nil {
+			log.Fatalf("Failed to load config: %v", err)
+		}
+	} else {
+		cfg = config.Default()
 	}
 
 	args := flag.Args()
@@ -85,8 +100,8 @@ Usage:
   mykb reindex [--force]   Generate embeddings for chunks without them
 
 Options:
-  --config PATH    Config file (default: %s)
-`, config.DefaultPath())
+  --config PATH    Config file (searches: %s)
+`, strings.Join(config.SearchPaths(), ", "))
 }
 
 func serveStdio() {

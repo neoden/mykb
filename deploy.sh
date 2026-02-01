@@ -11,6 +11,9 @@ HOST="${DEPLOY_HOST:?DEPLOY_HOST not set. Add it to .env or export it.}"
 echo "Building..."
 GOOS=linux GOARCH=amd64 go build -o mykb.bin .
 
+echo "Stopping service..."
+ssh ${HOST} "systemctl stop mykb 2>/dev/null || true"
+
 echo "Copying binary..."
 scp mykb.bin ${HOST}:/usr/local/bin/mykb
 rm mykb.bin
@@ -23,9 +26,15 @@ ssh ${HOST} << 'EOF'
     # Create user if not exists
     id mykb &>/dev/null || useradd -r -s /sbin/nologin mykb
 
-    # Create data directory
+    # Create directories
     mkdir -p /var/lib/mykb
+    mkdir -p /etc/mykb
     chown mykb:mykb /var/lib/mykb
+
+    # Check config exists
+    if [ ! -f /etc/mykb/config.toml ]; then
+        echo "WARNING: /etc/mykb/config.toml not found. Create it before starting."
+    fi
 
     # Reload and restart
     systemctl daemon-reload
