@@ -705,6 +705,117 @@ func TestTokenInvalidForm(t *testing.T) {
 	}
 }
 
+func TestValidateRedirectURIHTTPS(t *testing.T) {
+	err := validateRedirectURI("https://example.com/callback")
+	if err != nil {
+		t.Errorf("HTTPS should be valid: %v", err)
+	}
+}
+
+func TestValidateRedirectURIInvalidURL(t *testing.T) {
+	err := validateRedirectURI("://invalid")
+	if err == nil {
+		t.Error("Invalid URL should fail")
+	}
+}
+
+func TestValidateRedirectURINonLocalhostHTTP(t *testing.T) {
+	err := validateRedirectURI("http://evil.com/callback")
+	if err == nil {
+		t.Error("Non-localhost HTTP should fail")
+	}
+}
+
+func TestValidateRedirectURIUnknownScheme(t *testing.T) {
+	err := validateRedirectURI("ftp://example.com/callback")
+	if err == nil {
+		t.Error("Unknown scheme should fail")
+	}
+}
+
+func TestValidateRedirectURIWithFragment(t *testing.T) {
+	err := validateRedirectURI("https://example.com/callback#fragment")
+	if err == nil {
+		t.Error("URL with fragment should fail")
+	}
+}
+
+func TestRegisterInvalidJSON(t *testing.T) {
+	server, _ := setupTestServer(t)
+
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(`{invalid`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestRegisterInvalidRedirectURI(t *testing.T) {
+	server, _ := setupTestServer(t)
+
+	body := `{"redirect_uris": ["ftp://invalid.com/callback"]}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestRefreshTokenMissingClientID(t *testing.T) {
+	server, _ := setupTestServer(t)
+
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", "some-token")
+	// client_id is missing
+
+	req := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestRefreshTokenClientMismatch(t *testing.T) {
+	server, db := setupTestServer(t)
+
+	db.CreateClient("client-a", "Test A", []string{"http://localhost/callback"})
+	db.CreateClient("client-b", "Test B", []string{"http://localhost/callback"})
+
+	// Create refresh token for client-a
+	refreshToken := GenerateToken()
+	expiry := time.Now().Add(time.Hour).Unix()
+	db.StoreToken(storage.HashToken(refreshToken), storage.TokenRefresh, "client-a", expiry, nil)
+
+	// Try to use it with client-b
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	form.Set("client_id", "client-b") // Wrong client!
+
+	req := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
 func TestMCPInvalidContentType(t *testing.T) {
 	server, db := setupTestServer(t)
 
