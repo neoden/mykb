@@ -14,6 +14,26 @@ type DB struct {
 	conn *sql.DB
 }
 
+// Init initializes storage in the given directory.
+// Creates the directory if needed, opens the database, and runs migrations.
+func Init(dataDir string) (*DB, error) {
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, fmt.Errorf("create data directory: %w", err)
+	}
+
+	db, err := Open(filepath.Join(dataDir, "data.db"))
+	if err != nil {
+		return nil, err
+	}
+
+	if err := db.Migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+
+	return db, nil
+}
+
 // Open opens or creates a SQLite database at the given path.
 func Open(path string) (*DB, error) {
 	// Ensure parent directory exists

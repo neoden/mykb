@@ -79,6 +79,36 @@ func TestGetChunk(t *testing.T) {
 	}
 }
 
+func TestGetAllChunks(t *testing.T) {
+	db := setupTestDB(t)
+
+	db.CreateChunk("First", nil)
+	db.CreateChunk("Second", nil)
+	db.CreateChunk("Third", nil)
+
+	chunks, err := db.GetAllChunks()
+	if err != nil {
+		t.Fatalf("GetAllChunks: %v", err)
+	}
+
+	if len(chunks) != 3 {
+		t.Errorf("len(chunks) = %d, want 3", len(chunks))
+	}
+}
+
+func TestGetAllChunksEmpty(t *testing.T) {
+	db := setupTestDB(t)
+
+	chunks, err := db.GetAllChunks()
+	if err != nil {
+		t.Fatalf("GetAllChunks: %v", err)
+	}
+
+	if len(chunks) != 0 {
+		t.Errorf("len(chunks) = %d, want 0", len(chunks))
+	}
+}
+
 func TestGetChunkNotFound(t *testing.T) {
 	db := setupTestDB(t)
 
