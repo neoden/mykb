@@ -826,6 +826,73 @@ func TestRefreshTokenClientMismatch(t *testing.T) {
 	}
 }
 
+func TestRefreshTokenExpired(t *testing.T) {
+	server, db := setupTestServer(t)
+
+	db.CreateClient("test-client", "Test", []string{"http://localhost/callback"})
+
+	// Create expired refresh token (expired 1 hour ago)
+	// StoreToken's cleanup only deletes existing expired tokens before insert,
+	// so inserting with past expiry works
+	refreshToken := mustGenerateToken(t)
+	expiry := time.Now().Add(-time.Hour).Unix()
+	db.StoreToken(storage.HashToken(refreshToken), storage.TokenRefresh, "test-client", expiry, nil)
+
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	form.Set("client_id", "test-client")
+
+	req := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	var errResp map[string]string
+	json.NewDecoder(w.Body).Decode(&errResp)
+	if errResp["error"] != "invalid or expired refresh_token" {
+		t.Errorf("Error = %q, want 'invalid or expired refresh_token'", errResp["error"])
+	}
+}
+
+func TestRefreshTokenWrongTokenType(t *testing.T) {
+	server, db := setupTestServer(t)
+
+	db.CreateClient("test-client", "Test", []string{"http://localhost/callback"})
+
+	// Create an access token (not refresh token)
+	accessToken := mustGenerateToken(t)
+	expiry := time.Now().Add(time.Hour).Unix()
+	db.StoreToken(storage.HashToken(accessToken), storage.TokenAccess, "test-client", expiry, nil)
+
+	// Try to use access token as refresh token
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", accessToken) // This is actually an access token!
+	form.Set("client_id", "test-client")
+
+	req := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	var errResp map[string]string
+	json.NewDecoder(w.Body).Decode(&errResp)
+	if errResp["error"] != "invalid or expired refresh_token" {
+		t.Errorf("Error = %q, want 'invalid or expired refresh_token'", errResp["error"])
+	}
+}
+
 func TestMCPInvalidContentType(t *testing.T) {
 	server, db := setupTestServer(t)
 
